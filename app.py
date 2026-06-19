@@ -957,8 +957,6 @@ def groups_join(group_id):
         db.session.add(GroupMember(
             id=generate_id(), group_id=group_id, user_id=user.id, role='Member', join_status=status,
         ))
-        if status == 'Approved':
-            group.member_count += 1
         db.session.commit()
     return redirect(url_for('groups_page'))
 
@@ -971,10 +969,7 @@ def groups_leave(group_id):
 
     member = GroupMember.query.filter_by(group_id=group_id, user_id=user.id).first()
     if member and member.role != 'Owner':
-        group = db.session.get(Group, group_id)
         db.session.delete(member)
-        if group and member.join_status == 'Approved':
-            group.member_count = max(0, group.member_count - 1)
         db.session.commit()
     return redirect(url_for('groups_page'))
 
@@ -1819,8 +1814,6 @@ def tt_join_group(group_id):
         role     = 'Member',
         join_status = status,
     ))
-    if status == 'Approved':
-        group.member_count += 1
     db.session.commit()
 
     return jsonify({'message': f'Joined group (status: {status}).'}), 200
@@ -1838,10 +1831,7 @@ def tt_leave_group(group_id):
     if member.role == 'Owner':
         return jsonify({'error': 'Owner cannot leave. Delete the group instead.'}), 403
 
-    group = db.session.get(Group, group_id)
     db.session.delete(member)
-    if group and member.join_status == 'Approved':
-        group.member_count = max(0, group.member_count - 1)
     db.session.commit()
 
     return jsonify({'message': 'Left group.'})
