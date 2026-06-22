@@ -132,9 +132,16 @@ class Group(db.Model):
     group_type   = db.Column(db.String(10), nullable=False)   # 'Public' | 'Private'
     owner_id     = db.Column(db.String(32), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     destination_id = db.Column(db.String(32), ForeignKey('destinations.id', ondelete='SET NULL'))
-    member_count = db.Column(db.Integer, default=1)
     max_members  = db.Column(db.Integer, default=50)
     created_at   = db.Column(db.DateTime, default=datetime.now)
+
+    @property
+    def member_count(self):
+        return (
+            db.session.query(GroupMember)
+            .filter(GroupMember.group_id == self.id, GroupMember.join_status == 'Approved')
+            .count()
+        )
 
     owner       = relationship('User', back_populates='owned_groups')
     destination = relationship('Destination', back_populates='groups')
