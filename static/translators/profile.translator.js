@@ -84,7 +84,7 @@ window.SafarTranslator.boot({
       'footer.safety.register': 'Register Tourist',
       'footer.resources.title': 'Resources',
       'footer.resources.emergency': 'Emergency Contacts',
-      'footer.copy': '© 2025 SAFAR - Built with care by Team Safar',
+      'footer.copy': '© SAFAR - Built with care by Team Safar',
     },
     hi: {
       'gita.hint': 'विस्तार हेतु दबाएँ',
@@ -169,7 +169,7 @@ window.SafarTranslator.boot({
       'footer.safety.register': 'पर्यटक पंजीकरण',
       'footer.resources.title': 'संसाधन',
       'footer.resources.emergency': 'आपात संपर्क',
-      'footer.copy': '© 2025 SAFAR - टीम सफर द्वारा सावधानी से निर्मित',
+      'footer.copy': '© SAFAR - टीम सफर द्वारा सावधानी से निर्मित',
     },
     sa: {
       'gita.hint': 'विस्तारार्थं स्पृशतु',
@@ -254,7 +254,7 @@ window.SafarTranslator.boot({
       'footer.safety.register': 'पर्यटक-पंजीकरणम्',
       'footer.resources.title': 'संसाधनानि',
       'footer.resources.emergency': 'आपत्सम्पर्काः',
-      'footer.copy': '© 2025 SAFAR - सफर-दलेन सावधानतया निर्मितम्',
+      'footer.copy': '© SAFAR - सफर-दलेन सावधानतया निर्मितम्',
     },
   },
   manualTranslations: {

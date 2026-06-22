@@ -88,7 +88,7 @@ window.SafarTranslator.boot({
       'footer.ai': 'AI Assistant',
       'footer.safety.dashboard': 'Safety Dashboard',
       'footer.resources.title': 'Resources',
-      'footer.copy': '© 2025 SAFAR - Built with care by Team Safar',
+      'footer.copy': '© SAFAR - Built with care by Team Safar',
     },
     hi: {
       'gita.hint': 'विस्तार हेतु दबाएँ',
@@ -177,7 +177,7 @@ window.SafarTranslator.boot({
       'footer.ai': 'एआई सहायक',
       'footer.safety.dashboard': 'सुरक्षा डैशबोर्ड',
       'footer.resources.title': 'संसाधन',
-      'footer.copy': '© 2025 SAFAR - टीम सफर द्वारा सावधानी से निर्मित',
+      'footer.copy': '© SAFAR - टीम सफर द्वारा सावधानी से निर्मित',
     },
     sa: {
       'gita.hint': 'विस्तारार्थं स्पृशतु',
@@ -266,7 +266,7 @@ window.SafarTranslator.boot({
       'footer.ai': 'एआई-सहायकः',
       'footer.safety.dashboard': 'सुरक्षा-पटलम्',
       'footer.resources.title': 'संसाधनानि',
-      'footer.copy': '© 2025 SAFAR - सफर-दलेन सावधानतया निर्मितम्',
+      'footer.copy': '© SAFAR - सफर-दलेन सावधानतया निर्मितम्',
     },
   },
   manualTranslations: {

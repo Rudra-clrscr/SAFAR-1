@@ -58,7 +58,7 @@ const TRANSLATIONS = {
     // Footer
     'footer.tagline': "India's first AI-powered group travel platform with real-time tourist safety. Plan smart, travel safe.",
     'footer.quicklinks': 'Quick Links', 'footer.safety': 'Safety', 'footer.resources': 'Resources',
-    'footer.copy': '© 2025 SAFAR — Built with ❤️ by Team Safar',
+    'footer.copy': '© SAFAR — Built with ❤️ by Team Safar',
     // Chatbot
     'chatbot.greeting': '✈️ Hi! I\'m your SAFAR AI assistant. How can I help you plan your next trip?',
     'chatbot.placeholder': 'Ask me anything about travel...',
@@ -118,7 +118,7 @@ const TRANSLATIONS = {
     // Footer
     'footer.tagline': 'भारत का पहला AI-संचालित समूह यात्रा मंच। स्मार्ट योजना, सुरक्षित यात्रा।',
     'footer.quicklinks': 'त्वरित लिंक', 'footer.safety': 'सुरक्षा', 'footer.resources': 'संसाधन',
-    'footer.copy': '© 2025 SAFAR — टीम SAFAR द्वारा ❤️ से निर्मित',
+    'footer.copy': '© SAFAR — टीम SAFAR द्वारा ❤️ से निर्मित',
     'chatbot.greeting': '✈️ नमस्ते! मैं आपका SAFAR AI सहायक हूं। आपकी यात्रा योजना में कैसे मदद करूं?',
     'chatbot.placeholder': 'यात्रा के बारे में कुछ भी पूछें...',
     'nav.safety': '🛡️ सुरक्षा',
@@ -161,7 +161,7 @@ const TRANSLATIONS = {
     // Footer
     'footer.tagline': 'भारतस्य प्रथमं AI-चालितं समूहयात्रा-मञ्चम्।',
     'footer.quicklinks': 'त्वरित-लिंकाः', 'footer.safety': 'सुरक्षा', 'footer.resources': 'संसाधनानि',
-    'footer.copy': '© 2025 SAFAR — दलेन SAFAR निर्मितम्',
+    'footer.copy': '© SAFAR — दलेन SAFAR निर्मितम्',
     'chatbot.greeting': '✈️ नमस्ते! अहं भवतां SAFAR-AI-सहायकः अस्मि। यात्राविषये किं जानितुमिच्छन्ति?',
     'chatbot.placeholder': 'यात्राविषये किमपि पृच्छन्तु...',
     'nav.safety': '🛡️ सुरक्षा',

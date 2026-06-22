@@ -687,6 +687,53 @@ def create_group_sos_messages(user: User, tourist: Tourist, alert_label: str) ->
     return created_messages
 
 
+def trigger_hardware_sos(tourist, source_label='HARDWARE Panic', map_url=None):
+    """
+    Unified handler for physical SOS alerts from IoT devices.
+    Increases reliability by ensuring all channels (SocketIO, Database, Group Chat) are signaled.
+    """
+    # 1. Real-time UI notification (Admin Dashboard flashy alert)
+    socketio.emit('hardware_sos_triggered', {'tourist_id': tourist.id}, namespace='/')
+    
+    # 2. Database records
+    location_text = tourist.last_known_location
+    if map_url:
+        # If the device sends a custom Google Maps Link, prioritize it or append it
+        if "Map:" not in (location_text or ""):
+            location_text = f"{location_text or 'Unknown'} | Visual: {map_url}"
+        
+    db.session.add(Alert(tourist_id=tourist.id, location=location_text, alert_type='HARDWARE Panic'))
+    
+    # Check for existing active anomaly to prevent redundant entries in very short time
+    ten_sec_ago = datetime.now() - timedelta(seconds=10)
+    existing = Anomaly.query.filter(
+        Anomaly.tourist_id == tourist.id, 
+        Anomaly.status == 'active',
+        Anomaly.timestamp > ten_sec_ago
+    ).first()
+    
+    if not existing:
+        db.session.add(Anomaly(
+            tourist_id=tourist.id, 
+            anomaly_type='Hardware SOS', 
+            description=f'Physical SOS button press detected via {source_label}.', 
+            status='active'
+        ))
+    
+    # 3. Drop safety score to critical
+    tourist.safety_score = 0
+    
+    # 4. Notify travel groups (Auto-post to squad chats)
+    linked_user = db.session.get(User, tourist.user_id) if tourist.user_id else None
+    if linked_user:
+        sos_messages = create_group_sos_messages(linked_user, tourist, source_label)
+        for msg in sos_messages:
+            emit_group_message(msg)
+    
+    db.session.commit()
+    print(f"[SOS Helper] 🚨 Unified SOS Triggered for {tourist.name} (UID: {tourist.user_id}) via {source_label}")
+
+
 def normalize_translation_lang(lang: str | None) -> str:
     lang = (lang or "en").strip().lower()
     return lang if lang in SUPPORTED_TRANSLATION_LANGS else "en"
@@ -2157,6 +2204,40 @@ def safety_my_profile():
     })
 
 
+# ── IoT Device API  (/api/iot/...) ─────────────
+
+@app.route('/api/iot/blynk-webhook', methods=['GET', 'POST'])
+def api_iot_blynk_webhook():
+    """
+    Dedicated instant endpoint for Blynk IoT Webhooks.
+    To use: Set up a Blynk Webhook widget to POST to:
+    {YOUR_URL}/api/iot/blynk-webhook?token={AUTH_TOKEN}&v3={V3_VALUE}&v4={URL}
+    """
+    # Handle both Query String (GET) and Form/JSON (POST)
+    token = request.args.get('token') or (request.json or {}).get('token')
+    v3 = request.args.get('v3') or (request.json or {}).get('v3')
+    v4 = request.args.get('v4') or (request.json or {}).get('v4')
+    
+    if not token:
+        return jsonify({'error': 'token is required'}), 400
+        
+    tourist = Tourist.query.filter_by(blynk_token=token).first()
+    if not tourist:
+        # Fallback to general environment token if it matches
+        if token == os.environ.get('BLYNK_AUTH_TOKEN'):
+            tourist = Tourist.query.filter_by(iot_mode_enabled=True).first()
+            
+    if not tourist:
+        return jsonify({'error': 'No tourist profile matched this token'}), 404
+        
+    # Trigger SOS if v3 is high (1 or 255)
+    if v3 and str(v3) in ["1", "255"]:
+        trigger_hardware_sos(tourist, source_label='Blynk Webhook', map_url=v4)
+        return jsonify({'status': 'SOS triggered'}), 200
+        
+    return jsonify({'status': 'received'}), 200
+
+
 # ── Admin / Dashboard ─────────────────────────
 
 @app.route('/api/admin/tourists')
@@ -2425,19 +2506,20 @@ def blynk_loop():
                         res_v3 = requests.get(f"{base_url}&V3", timeout=3)
                         sos_val = res_v3.text.strip('[]"') if res_v3.status_code == 200 else "0"
                         
-                        if str(sos_val) == "1":
-                            # Always broadcast so UI flashes immediately on any press
-                            socketio.emit('hardware_sos_triggered', {'tourist_id': user.id}, namespace='/')
-                            
-                            # Log every press immediately without cooldown restrictions
-                            db.session.add(Alert(tourist_id=user.id, location=user.last_known_location, alert_type='HARDWARE Panic'))
-                            db.session.add(Anomaly(tourist_id=user.id, anomaly_type='Blynk Hardware SOS', description='Physical SOS button press detected via Blynk IoT Cloud.', status='active'))
-                            linked_user = db.session.get(User, user.user_id) if user.user_id else None
-                            sos_messages = create_group_sos_messages(linked_user, user, 'HARDWARE Panic') if linked_user else []
-                            user.safety_score = 0
-                            db.session.commit()
-                            for sos_message in sos_messages:
-                                emit_group_message(sos_message)
+                        # Extra poll for V4 if SOS is detected (only if V4 not cached)
+                        map_link = None
+                        
+                        if str(sos_val) in ["1", "255"]:
+                            # Fetch V4 (Google Maps URL) to include in the alert
+                            try:
+                                res_v4 = requests.get(f"{base_url}&V4", timeout=3)
+                                if res_v4.status_code == 200:
+                                    map_link = res_v4.text.strip('[]"')
+                            except:
+                                pass
+                                
+                            print(f"[Blynk Loop] 🔥 SOS Button Pressed for user {user.name} ({user.id})! (Value: {sos_val})")
+                            trigger_hardware_sos(user, source_label='Blynk Cloud Poll', map_url=map_link)
                         
                         # 2. GPS LOCATION CHECK (Happens every 125 loops * 0.4s = 50 seconds)
                         if loop_count % 125 == 0:
@@ -2450,6 +2532,7 @@ def blynk_loop():
                             if lat and lon and lat != "Invalid" and lon != "Invalid" and float(lat) != 0.0 and float(lon) != 0.0:
                                 user.last_known_location = f"Lat: {lat}, Lon: {lon}"
                                 user.last_updated_at = datetime.now()
+                                print(f"[Blynk Loop] 🌍 GPS Update for user {user.name} ({user.id}): Lat {lat}, Lon {lon}")
                         
                         db.session.commit()
                     except Exception as req_err:
@@ -2493,27 +2576,25 @@ def serial_monitor_loop():
                 
                 if line:
                     with app.app_context():
+                        is_sos = "SOS BUTTON PRESSED" in line.upper() or "SOS ALERT PRESSED" in line.upper()
+                        is_gps = line.startswith("GPS:")
+                        
+                        if is_sos:
+                            print(f"[USB Serial] 🚨 INSTANT HARDWARE SOS DETECTED FROM {ser.port}!!!")
+                        
                         # Link this hardware to the first Active IoT Tourist
                         user = Tourist.query.filter_by(iot_mode_enabled=True).first()
                         if not user:
+                            if is_sos or is_gps:
+                                print(f"[USB Serial] ⚠️ Event ignored: No Tourist has IoT Mode enabled! Please enable it in the frontend profile.")
                             continue
                             
                         # 1. 0-LATENCY USB SOS TRIGGER
-                        if "SOS BUTTON PRESSED" in line.upper():
-                            print(f"[USB Serial] 🚨 INSTANT HARDWARE SOS DETECTED FROM {ser.port}!!!")
-                            socketio.emit('hardware_sos_triggered', {'tourist_id': user.id}, namespace='/')
-                            
-                            db.session.add(Alert(tourist_id=user.id, location=user.last_known_location, alert_type='HARDWARE Panic'))
-                            db.session.add(Anomaly(tourist_id=user.id, anomaly_type='Direct USB Hardware SOS', description='Physical SOS button press detected via local USB COM3.', status='active'))
-                            linked_user = db.session.get(User, user.user_id) if user.user_id else None
-                            sos_messages = create_group_sos_messages(linked_user, user, 'HARDWARE Panic') if linked_user else []
-                            user.safety_score = 0
-                            db.session.commit()
-                            for sos_message in sos_messages:
-                                emit_group_message(sos_message)
+                        if is_sos:
+                            trigger_hardware_sos(user, source_label='Direct USB Serial')
                             
                         # 2. LOCAL USB GPS TRACKING TRIGGER
-                        elif line.startswith("GPS:"):
+                        elif is_gps:
                             try:
                                 coords = line.replace("GPS:", "").split(",")
                                 if len(coords) == 2:
@@ -2522,6 +2603,7 @@ def serial_monitor_loop():
                                         user.last_known_location = f"Lat: {lat}, Lon: {lon}"
                                         user.last_updated_at = datetime.now()
                                         db.session.commit()
+                                        print(f"[USB Serial] 🌍 GPS Update for user {user.name} ({user.id}): Lat {lat}, Lon {lon}")
                             except ValueError:
                                 pass # Incomplete or corrupt GPS stream
                                 
