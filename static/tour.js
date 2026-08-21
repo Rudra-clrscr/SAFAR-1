@@ -45,7 +45,9 @@
         text: 'Live GPS tracking, geo-fenced safety zones, anomaly detection, and a one-tap panic button.',
       },
       {
-        selector: '#animals-section',
+        // The whole section is nearly viewport-height, so spotlighting it pushed
+        // the cutout past every edge. The card row is the meaningful target.
+        selector: '.animals-grid, #animals-section',
         eyebrow: 'Architecture',
         title: 'Three systems power SAFAR',
         text: 'Airavat secures identity, Garuda handles live tracking & response, and Mayurya is the AI copilot. Let\'s meet them.',
@@ -429,12 +431,39 @@
   function placeSpotlight(target) {
     const rect = target.getBoundingClientRect();
     const pad = 8;
+    const margin = 12;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    let top = rect.top - pad;
+    let left = rect.left - pad;
+    let width = rect.width + pad * 2;
+    let height = rect.height + pad * 2;
+
+    // The cutout is drawn by a 9999px box-shadow, so a box larger than the
+    // viewport pushes the whole dim off-screen and a box entirely outside it
+    // dims everything with no visible highlight. Clamp so a border edge always
+    // stays on screen.
+    if (height > vh - margin * 2) {
+      top = margin;
+      height = vh - margin * 2;
+    } else {
+      top = Math.max(margin, Math.min(top, vh - height - margin));
+    }
+
+    if (width > vw - margin * 2) {
+      left = margin;
+      width = vw - margin * 2;
+    } else {
+      left = Math.max(margin, Math.min(left, vw - width - margin));
+    }
+
     spotEl.classList.remove('no-target');
-    spotEl.style.top = `${rect.top - pad}px`;
-    spotEl.style.left = `${rect.left - pad}px`;
-    spotEl.style.width = `${rect.width + pad * 2}px`;
-    spotEl.style.height = `${rect.height + pad * 2}px`;
-    positionAround(rect);
+    spotEl.style.top = `${top}px`;
+    spotEl.style.left = `${left}px`;
+    spotEl.style.width = `${width}px`;
+    spotEl.style.height = `${height}px`;
+    positionAround({ top, left, width, height, bottom: top + height, right: left + width });
   }
 
   // Smooth scrollIntoView duration varies with distance; polling until the

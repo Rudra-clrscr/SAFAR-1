@@ -88,7 +88,9 @@ if "pg8000" in DATABASE_URL:
         DATABASE_URL = re.sub(r'[?&]sslmode=[^&]+', '', DATABASE_URL)
 
 from sqlalchemy import create_engine, text, inspect
-from sqlalchemy.exc import DBAPIError, OperationalError, InterfaceError
+from sqlalchemy.exc import (
+    DBAPIError, OperationalError, InterfaceError, IntegrityError, PendingRollbackError,
+)
 from sqlalchemy.pool import NullPool
 
 # Try primary URL, then auto-fallback 6543 -> 5432 if needed
@@ -775,6 +777,10 @@ def translate_text_online(text: str, source: str, target: str) -> str:
 @app.errorhandler(OperationalError)
 @app.errorhandler(InterfaceError)
 @app.errorhandler(DBAPIError)
+# Postgres poisons a session after a failed flush, so every later query in that
+# request raises PendingRollbackError rather than a DBAPIError. SQLite never
+# does this, which is why it only ever surfaced as a 500 on Render.
+@app.errorhandler(PendingRollbackError)
 def handle_database_error(error):
     db.session.rollback()
     print(f"[DB] Request failed: {error}")
@@ -1014,7 +1020,12 @@ def groups_join(group_id):
         db.session.add(GroupMember(
             id=generate_id(), group_id=group_id, user_id=user.id, role='Member', join_status=status,
         ))
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # (group_id, user_id) is unique: a double-click or a second tab already
+            # joined. Roll back so the session stays usable and treat it as joined.
+            db.session.rollback()
     return redirect(url_for('groups_page'))
 
 

@@ -48,13 +48,62 @@ document.addEventListener('DOMContentLoaded', () => {
   const msgBox = document.getElementById('chatbot-msgs');
   const suggestionButtons = Array.from(document.querySelectorAll('[data-chat-prompt]'));
 
+  // script.js is shared by every page except /travel, and those pages load
+  // different stylesheets — inject the action-button style so it looks the
+  // same everywhere rather than editing each one.
+  if (msgBox && !document.getElementById('chat-action-styles')) {
+    const actionStyle = document.createElement('style');
+    actionStyle.id = 'chat-action-styles';
+    actionStyle.textContent = `
+      .chat-action {
+        align-self: flex-start;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 600;
+        padding: 8px 15px;
+        border-radius: 12px;
+        color: var(--bg, #0b0a12);
+        background: linear-gradient(135deg, var(--tt, #14b8a6), var(--tt2, #0d9488));
+        box-shadow: 0 3px 12px var(--tt-glow, rgba(20,184,166,.35));
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+      .chat-action:hover { transform: translateY(-1px); }
+    `;
+    document.head.appendChild(actionStyle);
+  }
+
+  // ── Lightweight markdown → HTML renderer ──────────────────────────────
+  // Mayurya replies in markdown, so bold/bullets must render rather than
+  // showing raw asterisks. Escapes HTML first to keep model output inert.
+  function renderMarkdown(raw) {
+    const esc = raw
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    return esc
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/`(.+?)`/g, '<code>$1</code>')
+      .replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>')
+      .replace(/^[-•]\s+(.+)$/gm, '<li>$1</li>')
+      .replace(/(<li>.*<\/li>\n?)+/g, (m) => `<ul>${m}</ul>`)
+      .replace(/^---$/gm, '<hr>')
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/\n/g, '<br>');
+  }
+
   function appendMsg(text, who) {
     if (!msgBox) return;
     const wrapper = document.createElement('div');
     wrapper.className = `chat-msg ${who}`;
 
     const message = document.createElement('p');
-    message.textContent = text;
+    if (who === 'bot') {
+      message.innerHTML = renderMarkdown(text);
+    } else {
+      message.textContent = text;
+    }
     wrapper.appendChild(message);
 
     const stamp = document.createElement('small');
@@ -80,65 +129,48 @@ document.addEventListener('DOMContentLoaded', () => {
     if (indicator) indicator.remove();
   }
 
-  const localReplies = [
-    {
-      match: /hello|hi|namaste|hey/i,
-      text: 'Hi, I am Mayurya. Ask me about destinations, itineraries, safety, or how SAFAR works.',
-    },
-    {
-      match: /how.*work|what can you do|help/i,
-      text: 'I can help with trip ideas, destination highlights, safety features, travel groups, and planning prompts.',
-    },
-    {
-      match: /join.*group|travel group/i,
-      text: 'Open Groups, browse active trips, and join a public group instantly or request access to a private one.',
-    },
-    {
-      match: /create.*group/i,
-      text: 'Go to Groups and start a squad with destination, type, dates, and a short trip brief.',
-    },
-    {
-      match: /safety|safe/i,
-      text: 'SAFAR includes live safety tracking, monitored zones, anomaly alerts, and a quick panic pathway from the safety dashboard.',
-    },
-    {
-      match: /destination|jaipur|manali|goa|kerala|varanasi|ladakh|agra|shimla/i,
-      text: 'Popular picks on SAFAR include Jaipur for heritage, Manali for mountain trips, Goa for quick coastal escapes, Kerala for scenic slow travel, and Varanasi for spiritual exploration.',
-    },
-    {
-      match: /plan|itinerary|trip|budget/i,
-      text: 'Start with destination, travel dates, group size, and budget. Mayurya can then shape route ideas, stay length, and activity priorities from that brief.',
-    },
-    {
-      match: /hindi|sanskrit|english|language|translate/i,
-      text: 'Use the language toggle in the navbar to switch the Mayurya page between English, Hindi, and Sanskrit.',
-    },
-  ];
+  // ── Persistent session ID keying Mayurya's server-side memory ─────────
+  function newSessionId() {
+    return (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+
+  function getSessionId() {
+    let sid = localStorage.getItem('mayurya_session_id');
+    if (!sid) {
+      sid = newSessionId();
+      localStorage.setItem('mayurya_session_id', sid);
+    }
+    return sid;
+  }
+
+  // Mayurya can offer a button that jumps to the page it just talked about.
+  function appendAction(action) {
+    if (!msgBox || !action || action.type !== 'navigate' || !action.url) return;
+    const link = document.createElement('a');
+    link.className = 'chat-action';
+    link.href = action.url;
+    link.textContent = action.label || 'Open';
+    msgBox.appendChild(link);
+    msgBox.scrollTop = msgBox.scrollHeight;
+  }
 
   async function getBotResponse(message) {
     showTyping();
-
-    const localReply = localReplies.find((entry) => entry.match.test(message));
-    if (localReply) {
-      window.setTimeout(() => {
-        hideTyping();
-        appendMsg(localReply.text, 'bot');
-      }, 450);
-      return;
-    }
 
     try {
       const response = await fetch('/api/chatbot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message, session_id: getSessionId() }),
       });
 
       hideTyping();
 
       if (!response.ok) {
         if (response.status === 404) {
-          appendMsg('This preview build does not have the live Mayurya API connected, but I can still help with destinations, groups, safety, and trip-planning basics here.', 'bot');
+          appendMsg('Mayurya AI is not connected in this preview build. Restart the Flask server to enable live replies.', 'bot');
           return;
         }
         let errorMessage = "Sorry, I couldn't process that right now.";
@@ -154,6 +186,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const payload = await response.json();
       appendMsg(payload.response || 'I am ready to help with your next travel question.', 'bot');
+      appendAction(payload.action);
     } catch (_) {
       hideTyping();
       appendMsg('Connection issue detected. Please try again in a moment.', 'bot');
@@ -182,6 +215,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (clearBtn && msgBox) {
     clearBtn.addEventListener('click', () => {
+      // A fresh session id is what drops the server-side conversation memory.
+      localStorage.setItem('mayurya_session_id', newSessionId());
       msgBox.innerHTML = '';
       appendMsg('Chat cleared. Ask Mayurya anything.', 'bot');
     });
