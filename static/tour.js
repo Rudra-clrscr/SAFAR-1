@@ -244,6 +244,7 @@
   let steps = [];
   let stepIndex = 0;
   let currentPage = null;
+  let sessionId = 0; // bumped on every start()/end() so stale async callbacks (scroll-settle) no-op
 
   let blockerEl, spotEl, tooltipEl;
 
@@ -412,18 +413,56 @@
       return;
     }
 
-    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (resizeOnly) {
+      placeSpotlight(target);
+      return;
+    }
 
-    window.setTimeout(() => {
+    const startedSession = sessionId;
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    waitForScrollSettle(target, () => {
+      if (sessionId !== startedSession) return; // a newer start()/end() superseded this callback
+      placeSpotlight(target);
+    });
+  }
+
+  function placeSpotlight(target) {
+    const rect = target.getBoundingClientRect();
+    const pad = 8;
+    spotEl.classList.remove('no-target');
+    spotEl.style.top = `${rect.top - pad}px`;
+    spotEl.style.left = `${rect.left - pad}px`;
+    spotEl.style.width = `${rect.width + pad * 2}px`;
+    spotEl.style.height = `${rect.height + pad * 2}px`;
+    positionAround(rect);
+  }
+
+  // Smooth scrollIntoView duration varies with distance; polling until the
+  // target's position stops changing avoids positioning the (fixed-position)
+  // spotlight/tooltip against a mid-scroll rect that goes stale a moment later.
+  function waitForScrollSettle(target, callback) {
+    let lastTop = null;
+    let stableFrames = 0;
+    let frame = 0;
+    const maxFrames = 90; // ~1.5s safety cap at 60fps
+
+    function check() {
       const rect = target.getBoundingClientRect();
-      const pad = 8;
-      spotEl.classList.remove('no-target');
-      spotEl.style.top = `${rect.top - pad}px`;
-      spotEl.style.left = `${rect.left - pad}px`;
-      spotEl.style.width = `${rect.width + pad * 2}px`;
-      spotEl.style.height = `${rect.height + pad * 2}px`;
-      positionAround(rect);
-    }, resizeOnly ? 0 : 120);
+      if (lastTop !== null && Math.abs(rect.top - lastTop) < 0.5) {
+        stableFrames += 1;
+      } else {
+        stableFrames = 0;
+      }
+      lastTop = rect.top;
+      frame += 1;
+
+      if (stableFrames >= 3 || frame >= maxFrames) {
+        callback();
+        return;
+      }
+      requestAnimationFrame(check);
+    }
+    requestAnimationFrame(check);
   }
 
   function advance(delta, skipEmpty) {
@@ -438,6 +477,7 @@
   }
 
   function end(markSeen) {
+    sessionId += 1;
     steps = [];
     stepIndex = 0;
     if (blockerEl) blockerEl.remove();
@@ -452,6 +492,7 @@
     const pageSteps = TOURS[pageKey];
     if (!pageSteps || !pageSteps.length) return;
     end(false);
+    document.getElementById('safar-tour-prompt')?.remove();
     ensureDom();
     steps = pageSteps;
     stepIndex = 0;
