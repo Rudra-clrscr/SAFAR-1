@@ -8,10 +8,11 @@
   <meta name="description"
     content="Mayurya is SAFAR's multilingual travel intelligence system for destinations, safety guidance, itineraries, and group travel support.">
   <link rel="stylesheet" href="/static/travel.css">
+  <link rel="stylesheet" href="/static/tour.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
 </head>
 
-<body class="travel-page" data-lang="en">
+<body class="travel-page" data-lang="en" data-page="travel">
   <div id="petals-container"></div>
 
   <div class="gita-bar" id="gita-quote-bar">
@@ -45,6 +46,7 @@
         <span class="lang-flag">🇮🇳</span>
         <span class="lang-label">EN</span>
       </button>
+      <button id="tour-trigger-btn" class="btn-nav btn-nav-outline" title="Take a guided tour">🧭 Tour</button>
     </div>
     <button class="menu-toggle" id="menu-toggle"><span></span><span></span><span></span></button>
   </nav>
@@ -313,6 +315,7 @@
   <script src="/static/dictionary-agent.js"></script>
   <script src="/static/translator-core.js"></script>
   <script src="/static/translators/travel.translator.js"></script>
+  <script src="/static/tour.js"></script>
 </body>
 
 </html>

@@ -12,6 +12,7 @@
     rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
   <link rel="stylesheet" href="/static/blockchain.css">
+  <link rel="stylesheet" href="/static/tour.css">
   <style>
     /* ═══════════════════════════════════════════════════
          AIRAVAT HERO — Divine Parallax Background
@@ -673,7 +674,7 @@
   </style>
 </head>
 
-<body class="blockchain-page" data-lang="en">
+<body class="blockchain-page" data-lang="en" data-page="blockchain">
   <!-- Custom divine cursor -->
   <div id="divine-cursor"></div>
 
@@ -707,6 +708,7 @@
       <a href="/profile" class="nav-badge ast" data-i18n="nav.safety">🛡️ Safety</a>
       <button id="lang-toggle-btn" title="Toggle Language"><span class="lang-flag">🇯🇳</span><span
           class="lang-label">EN</span></button>
+      <button id="tour-trigger-btn" class="btn-nav btn-nav-outline" title="Take a guided tour">🧭 Tour</button>
     </div>
     <button class="menu-toggle" id="menu-toggle"><span></span><span></span><span></span></button>
   </nav>
@@ -1010,6 +1012,7 @@
   <script src="/static/translator-core.js"></script>
   <script src="/static/translators/blockchain.translator.js"></script>
   <script src="/static/mayurya-bubble.js"></script>
+  <script src="/static/tour.js"></script>
 </body>
 
 </html>

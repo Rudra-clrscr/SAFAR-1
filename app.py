@@ -102,6 +102,11 @@ chosen_url = DATABASE_URL
 db_connection_ready = True
 using_sqlite = False
 
+def _redact_db_url(url: str) -> str:
+    """Strip credentials before a connection string ever hits logs."""
+    return re.sub(r'://([^:/@]+):[^@]*@', r'://\1:***@', url)
+
+
 def _try_connect(url: str) -> bool:
     """One-shot connection probe so we can gracefully fall back."""
     opts = {'connect_args': connect_args, 'poolclass': NullPool} if 'pg8000' in url else {}
@@ -111,10 +116,10 @@ def _try_connect(url: str) -> bool:
             conn.execute(text("SELECT 1"))
         return True
     except (OperationalError, InterfaceError, TypeError, ValueError) as e:
-        print(f"[DB] Connection failed for {url}: {e}")
+        print(f"[DB] Connection failed for {_redact_db_url(url)}: {e}")
         return False
     except Exception as e:
-        print(f"[DB] Unexpected connection failure for {url}: {e}")
+        print(f"[DB] Unexpected connection failure for {_redact_db_url(url)}: {e}")
         return False
     finally:
         engine.dispose()
@@ -159,11 +164,16 @@ if not db_connection_ready:
             "Supabase pooler connection string and database password."
         )
     print("[DB] Remote DB unavailable; falling back to local SQLite.")
-    chosen_url = SQLITE_URL
     connect_args = {}
     using_sqlite = True
     db_connection_ready = True
-    os.makedirs(os.path.join(os.path.abspath(os.path.dirname(__file__)), 'instance'), exist_ok=True)
+    try:
+        os.makedirs(os.path.join(os.path.abspath(os.path.dirname(__file__)), 'instance'), exist_ok=True)
+        chosen_url = SQLITE_URL
+    except OSError:
+        # Deploy filesystem is read-only (e.g. serverless platforms) — use /tmp instead.
+        import tempfile
+        chosen_url = 'sqlite:///' + os.path.join(tempfile.gettempdir(), 'safar_local.db')
 
 app.config['SQLALCHEMY_DATABASE_URI'] = chosen_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -1173,76 +1183,69 @@ def travel_page():
 
 # ─────────────────────────────────────────────
 # MAYURYA CHATBOT  (/api/chatbot)
-# Proxies user messages to the n8n AI agent webhook.
-# Keeps the webhook URL server-side so it never appears in client JS.
+# Sends user messages to the Gemini API and returns its reply.
+# Keeps the API key server-side (header, never in a URL) so it never
+# appears in client JS or in request logs.
 # ─────────────────────────────────────────────
 
-N8N_WEBHOOK_URL = os.environ.get(
-    'N8N_WEBHOOK_URL',
-    'https://rpsbareilly06.app.n8n.cloud/webhook/safar-chat'
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3.6-flash').strip()
+GEMINI_API_URL = f'https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent'
+
+MAYURYA_SYSTEM_PROMPT = (
+    "You are Mayurya, the AI travel assistant built into SAFAR, an Indian group-travel and "
+    "tourist-safety platform. Help users with destination ideas, itineraries, and budget tips, "
+    "and explain SAFAR's own features when asked: travel groups and real-time group chat "
+    "(at /groups), a safety dashboard with live GPS tracking, geo-fenced safety zones, anomaly "
+    "detection and a one-tap panic button (at /profile), and a blockchain-backed identity "
+    "ledger (at /blockchain). Keep answers concise, warm, and focused on travel in India "
+    "unless the user asks otherwise."
 )
 
 @app.route('/api/chatbot', methods=['POST'])
 def api_chatbot():
-    """Forward a chat message to the n8n Mayurya AI agent and return its reply."""
+    """Send a chat message to the Gemini API and return Mayurya's reply."""
     data = request.get_json(silent=True) or {}
     message = (data.get('message') or '').strip()
-    # Prefer session_id sent by frontend (localStorage UUID) for memory continuity
-    session_id = (data.get('session_id') or session.get('user_id') or 'anonymous')
 
     if not message:
         return jsonify({'error': 'message is required'}), 400
 
-    if not N8N_WEBHOOK_URL:
+    if not GEMINI_API_KEY:
         return jsonify({'error': 'Chatbot backend is not configured.'}), 503
 
     try:
-        n8n_response = requests.post(
-            N8N_WEBHOOK_URL,
-            json={'message': message, 'session_id': session_id},
-            headers={'Content-Type': 'application/json'},
-            timeout=60,
+        gemini_response = requests.post(
+            GEMINI_API_URL,
+            json={
+                'system_instruction': {'parts': [{'text': MAYURYA_SYSTEM_PROMPT}]},
+                'contents': [{'role': 'user', 'parts': [{'text': message}]}],
+            },
+            headers={
+                'Content-Type': 'application/json',
+                'x-goog-api-key': GEMINI_API_KEY,
+            },
+            timeout=30,
         )
-
-        # Log full response for debugging
-        print(f'[Chatbot] n8n status: {n8n_response.status_code}')
-        print(f'[Chatbot] n8n body: {n8n_response.text[:500]}')
-
-        n8n_response.raise_for_status()
-
-        raw_body = n8n_response.text.strip()
-        if not raw_body:
-            print(f'[Chatbot] n8n empty body for: "{message[:80]}" — Switch node likely has no fallback branch.')
-            return jsonify({'response': "I can help with travel destinations, itineraries, safety tips, hotels, restaurants, and budget planning. Could you rephrase your question?"}), 200
+        gemini_response.raise_for_status()
+        payload = gemini_response.json()
 
         try:
-            payload = n8n_response.json()
-        except ValueError:
-            print(f'[Chatbot] n8n returned non-JSON body: {raw_body[:200]}')
-            return jsonify({'response': raw_body}), 200
-
-        # n8n returns either a dict OR a list — normalise to dict first
-        if isinstance(payload, list):
-            payload = payload[0] if payload else {}
-
-        # n8n agents typically return { output: "..." } or { response: "..." }
-        reply = (
-            payload.get('output')
-            or payload.get('response')
-            or payload.get('text')
-            or payload.get('message')
-            or 'I am ready to help with your next travel question.'
-        )
+            reply = payload['candidates'][0]['content']['parts'][0]['text']
+        except (KeyError, IndexError, TypeError):
+            block_reason = payload.get('promptFeedback', {}).get('blockReason')
+            print(f'[Chatbot] Gemini returned no usable candidate (blockReason={block_reason}): {str(payload)[:300]}')
+            reply = "I can help with destinations, itineraries, safety tips, and trip planning. Could you rephrase that?"
 
         return jsonify({'response': reply})
 
     except requests.Timeout:
-        print(f'[Chatbot] n8n timed out after 30s for URL: {N8N_WEBHOOK_URL}')
+        print('[Chatbot] Gemini request timed out after 30s')
         return jsonify({'response': 'Mayurya is thinking… please try again in a moment.'}), 200
     except requests.RequestException as exc:
-        print(f'[Chatbot] n8n request failed: {exc}')
-        print(f'[Chatbot] URL used: {N8N_WEBHOOK_URL}')
-        return jsonify({'response': 'Connection to Mayurya agent failed. Please try again shortly.'}), 200
+        # exc/response text may echo request details but never the api key (sent via header, not URL)
+        print(f'[Chatbot] Gemini request failed: {exc}')
+        return jsonify({'response': 'Connection to Mayurya AI failed. Please try again shortly.'}), 200
 
 
 @app.route('/user')

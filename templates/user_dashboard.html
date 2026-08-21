@@ -4,8 +4,9 @@
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>My Dashboard — SAFAR</title>
   <link rel="stylesheet" href="/static/user_dashboard.css">
+  <link rel="stylesheet" href="/static/tour.css">
 </head>
-<body class="udash-page" data-lang="en">
+<body class="udash-page" data-lang="en" data-page="user_dashboard">
 
 <!-- Gita Bar -->
 <div class="gita-bar" id="gita-quote-bar">
@@ -33,6 +34,7 @@
       <span class="lang-flag">🇯🇳</span>
       <span class="lang-label">EN</span>
     </button>
+    <button id="tour-trigger-btn" class="btn-nav btn-nav-outline" title="Take a guided tour">🧭 Tour</button>
   </div>
   <button class="menu-toggle" id="menu-toggle"><span></span><span></span><span></span></button>
 </nav>
@@ -132,4 +134,5 @@
   <script src="/static/translator-core.js"></script>
   <script src="/static/translators/user_dashboard.translator.js"></script>
   <script src="/static/mayurya-bubble.js"></script>
+  <script src="/static/tour.js"></script>
 </body></html>

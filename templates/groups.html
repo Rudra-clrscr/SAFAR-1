@@ -8,9 +8,10 @@
     name="description"
     content="Create photo-first travel groups on SAFAR, upload a group cover, discover public circles, and build private crews with an Indian culture visual language.">
   <link rel="stylesheet" href="/static/groups.css">
+  <link rel="stylesheet" href="/static/tour.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
 </head>
-<body class="travel-page sangha-page" data-lang="en">
+<body class="travel-page sangha-page" data-lang="en" data-page="groups">
   <div id="petals-container"></div>
 
   <div class="gita-bar" id="gita-quote-bar">
@@ -39,6 +40,7 @@
         <span class="lang-flag">🇮🇳</span>
         <span class="lang-label">EN</span>
       </button>
+      <button id="tour-trigger-btn" class="btn-nav btn-nav-outline" title="Take a guided tour">🧭 Tour</button>
     </div>
     <button class="menu-toggle" id="menu-toggle"><span></span><span></span><span></span></button>
   </nav>
@@ -510,5 +512,6 @@
   <script src="/static/translators/groups.translator.js"></script>
   <script src="/static/mayurya-bubble.js"></script>
   <script src="/static/groups.js"></script>
+  <script src="/static/tour.js"></script>
 </body>
 </html>

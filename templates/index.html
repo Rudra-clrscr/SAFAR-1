@@ -6,10 +6,11 @@
   <title>SAFAR — Travel Smart. Travel Safe. Travel Together.</title>
   <meta name="description" content="SAFAR is India's first AI-powered group travel platform with real-time tourist safety — plan trips, join travel communities, and explore with confidence.">
   <link rel="stylesheet" href="/static/index.css">
+  <link rel="stylesheet" href="/static/tour.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
 </head>
 
-<body class="home-page" data-lang="en">
+<body class="home-page" data-lang="en" data-page="home">
 
   <!-- ═══ LOTUS PETAL PARTICLES (injected by JS) ═══ -->
   <div id="petals-container"></div>
@@ -48,6 +49,7 @@
         <span class="lang-flag">🇮🇳</span>
         <span class="lang-label">EN</span>
       </button>
+      <button id="tour-trigger-btn" class="btn-nav btn-nav-outline" title="Take a guided tour">🧭 Tour</button>
     </div>
     <button class="menu-toggle" id="menu-toggle"><span></span><span></span><span></span></button>
   </nav>
@@ -564,5 +566,6 @@
   <script src="/static/dictionary-agent.js"></script>
   <script src="/static/translator-core.js"></script>
   <script src="/static/translators/index.translator.js"></script>
+  <script src="/static/tour.js"></script>
 </body>
 </html>
