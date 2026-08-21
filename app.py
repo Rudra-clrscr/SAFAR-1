@@ -2508,6 +2508,7 @@ def api_iot_blynk_webhook():
 THINGSPEAK_CHANNEL_ID = os.environ.get('THINGSPEAK_CHANNEL_ID', '3465207').strip()
 THINGSPEAK_READ_API_KEY = os.environ.get('THINGSPEAK_READ_API_KEY', '').strip()
 THINGSPEAK_POLL_SECONDS = int(os.environ.get('THINGSPEAK_POLL_SECONDS', '10'))
+THINGSPEAK_TOURIST_ID = os.environ.get('THINGSPEAK_TOURIST_ID', '').strip()
 THINGSPEAK_FEED_URL = f'https://api.thingspeak.com/channels/{THINGSPEAK_CHANNEL_ID}/feeds.json'
 
 # entry_id of the last row already acted on, so a re-read of the same SOS row
@@ -2574,9 +2575,24 @@ def _thingspeak_parse_entry(entry):
 
 
 def _thingspeak_target_tourist():
-    """The demo rig is a single device, so bind it to the IoT-enabled tourist."""
+    """The demo rig is a single device, so it maps to exactly one tourist.
+
+    Pin that with THINGSPEAK_TOURIST_ID. Without it the seeded demo rows
+    (ten of them carry iot_mode_enabled) make the choice arbitrary — an
+    unordered .first() is whatever Postgres happens to scan first, so an SOS
+    could be filed against the wrong person.
+    """
+    if THINGSPEAK_TOURIST_ID:
+        try:
+            pinned = db.session.get(Tourist, int(THINGSPEAK_TOURIST_ID))
+        except (TypeError, ValueError):
+            pinned = None
+        if pinned:
+            return pinned
+        print(f'[ThingSpeak] THINGSPEAK_TOURIST_ID={THINGSPEAK_TOURIST_ID} matches no tourist.')
+
     return (
-        Tourist.query.filter_by(iot_mode_enabled=True).first()
+        Tourist.query.filter_by(iot_mode_enabled=True).order_by(Tourist.id.desc()).first()
         or Tourist.query.order_by(Tourist.id.desc()).first()
     )
 
