@@ -2498,6 +2498,176 @@ def api_iot_blynk_webhook():
     return jsonify({'status': 'received'}), 200
 
 
+# ── ThingSpeak IoT  (/api/iot/thingspeak/...) ──
+# The ESP32 in iot_device/safar_tracker.ino writes to a ThingSpeak channel:
+#   field1 = latitude   field2 = longitude
+#   field3 = SOS state (1 while the button is held)
+#   field4 = GPS fix valid (1 = real coordinates, 0 = no lock yet)
+# It posts every 20s, and immediately on an SOS press.
+
+THINGSPEAK_CHANNEL_ID = os.environ.get('THINGSPEAK_CHANNEL_ID', '3465207').strip()
+THINGSPEAK_READ_API_KEY = os.environ.get('THINGSPEAK_READ_API_KEY', '').strip()
+THINGSPEAK_POLL_SECONDS = int(os.environ.get('THINGSPEAK_POLL_SECONDS', '10'))
+THINGSPEAK_FEED_URL = f'https://api.thingspeak.com/channels/{THINGSPEAK_CHANNEL_ID}/feeds.json'
+
+# entry_id of the last row already acted on, so a re-read of the same SOS row
+# does not fire a second alert. ThingSpeak keeps returning the latest entry
+# between device writes (one write per 20s vs. a 10s poll).
+_thingspeak_state = {'last_entry_id': None, 'last_error': None, 'last_ok_at': None}
+
+
+def _thingspeak_fetch(results=1):
+    """Read the most recent feed rows. Returns (payload, error_message)."""
+    if not THINGSPEAK_CHANNEL_ID:
+        return None, 'THINGSPEAK_CHANNEL_ID is not set.'
+
+    params = {'results': max(1, min(int(results), 100))}
+    if THINGSPEAK_READ_API_KEY:
+        params['api_key'] = THINGSPEAK_READ_API_KEY
+
+    try:
+        response = requests.get(THINGSPEAK_FEED_URL, params=params, timeout=8)
+    except requests.RequestException as exc:
+        return None, f'ThingSpeak unreachable: {exc}'
+
+    # A private channel without a valid read key answers 400 with the body "-1".
+    if response.status_code != 200 or response.text.strip() == '-1':
+        return None, (
+            'ThingSpeak refused the read. The channel is private — set '
+            'THINGSPEAK_READ_API_KEY to its Read API Key.'
+        )
+
+    try:
+        return response.json(), None
+    except ValueError:
+        return None, 'ThingSpeak returned a malformed response.'
+
+
+def _thingspeak_parse_entry(entry):
+    """Turn one raw feed row into plain values, or None where the field is unusable."""
+    def num(key):
+        raw = entry.get(key)
+        if raw is None or str(raw).strip() == '':
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
+    lat, lon = num('field1'), num('field2')
+    sos = num('field3')
+    gps_valid = num('field4')
+
+    # field4 is the sketch's own fix flag; it sends 0,0 with field4=0 before lock.
+    located = bool(gps_valid) and lat is not None and lon is not None and (lat != 0.0 or lon != 0.0)
+
+    return {
+        'entry_id': entry.get('entry_id'),
+        'created_at': entry.get('created_at'),
+        'lat': lat,
+        'lon': lon,
+        'sos': sos == 1,
+        'gps_valid': bool(gps_valid),
+        'located': located,
+        'status': entry.get('status'),
+    }
+
+
+def _thingspeak_target_tourist():
+    """The demo rig is a single device, so bind it to the IoT-enabled tourist."""
+    return (
+        Tourist.query.filter_by(iot_mode_enabled=True).first()
+        or Tourist.query.order_by(Tourist.id.desc()).first()
+    )
+
+
+@app.route('/api/iot/thingspeak/feed')
+def api_thingspeak_feed():
+    """Live device telemetry for the admin dashboard."""
+    try:
+        results = int(request.args.get('results', 20))
+    except (TypeError, ValueError):
+        results = 20
+
+    payload, error = _thingspeak_fetch(results)
+    if error:
+        return jsonify({
+            'connected': False,
+            'error': error,
+            'channel_id': THINGSPEAK_CHANNEL_ID,
+            'entries': [],
+        }), 200
+
+    channel = payload.get('channel') or {}
+    entries = [_thingspeak_parse_entry(e) for e in (payload.get('feeds') or [])]
+    latest = entries[-1] if entries else None
+
+    return jsonify({
+        'connected': True,
+        'channel_id': THINGSPEAK_CHANNEL_ID,
+        'channel_name': channel.get('name'),
+        'last_entry_at': channel.get('updated_at'),
+        'latest': latest,
+        'entries': entries,
+    })
+
+
+def thingspeak_loop():
+    """Polls the ThingSpeak channel for GPS updates and SOS presses."""
+    if not THINGSPEAK_CHANNEL_ID:
+        print('[ThingSpeak] No channel configured — poller not started.')
+        return
+
+    warned_about_key = False
+
+    while True:
+        with app.app_context():
+            payload, error = _thingspeak_fetch(1)
+
+            if error:
+                _thingspeak_state['last_error'] = error
+                # The missing-key case never fixes itself; say it once, not every 10s.
+                if 'THINGSPEAK_READ_API_KEY' in error:
+                    if not warned_about_key:
+                        print(f'[ThingSpeak] {error}')
+                        warned_about_key = True
+                else:
+                    print(f'[ThingSpeak] {error}')
+            else:
+                warned_about_key = False
+                _thingspeak_state['last_error'] = None
+                _thingspeak_state['last_ok_at'] = datetime.now()
+
+                feeds = payload.get('feeds') or []
+                if feeds:
+                    entry = _thingspeak_parse_entry(feeds[-1])
+                    is_new = entry['entry_id'] != _thingspeak_state['last_entry_id']
+                    _thingspeak_state['last_entry_id'] = entry['entry_id']
+
+                    try:
+                        tourist = _thingspeak_target_tourist()
+                        if tourist and is_new:
+                            if entry['located']:
+                                tourist.last_known_location = f"Lat: {entry['lat']}, Lon: {entry['lon']}"
+                                tourist.last_updated_at = datetime.now()
+                                print(f"[ThingSpeak] 🌍 GPS {entry['lat']}, {entry['lon']} for {tourist.name}")
+
+                            if entry['sos']:
+                                map_url = (
+                                    f"https://maps.google.com/?q={entry['lat']},{entry['lon']}"
+                                    if entry['located'] else None
+                                )
+                                print(f"[ThingSpeak] 🔥 SOS press for {tourist.name} (entry {entry['entry_id']})")
+                                trigger_hardware_sos(tourist, source_label='ThingSpeak Channel', map_url=map_url)
+                            else:
+                                db.session.commit()
+                    except Exception as exc:
+                        db.session.rollback()
+                        print(f'[ThingSpeak] Could not apply telemetry: {exc}')
+
+        time.sleep(max(5, THINGSPEAK_POLL_SECONDS))
+
+
 # ── Admin / Dashboard ─────────────────────────
 
 @app.route('/api/admin/tourists')
@@ -2747,64 +2917,6 @@ def anomaly_loop():
             print(f"Anomaly loop error: {e}")
         time.sleep(300)
 
-def blynk_loop():
-    """Polls Blynk Cloud. SOS every 2s (instant reflex), GPS every 50s (battery save)."""
-    loop_count = 0
-    while True:
-        with app.app_context():
-            try:
-                users = Tourist.query.filter_by(iot_mode_enabled=True).all()
-                for user in users:
-                    active_token = user.blynk_token or os.environ.get('BLYNK_AUTH_TOKEN')
-                    if not active_token:
-                        continue
-                    
-                    base_url = f"https://blynk.cloud/external/api/get?token={active_token}"
-                    
-                    try:
-                        # 1. INSTANT SOS CHECK (Happens every 2 seconds)
-                        res_v3 = requests.get(f"{base_url}&V3", timeout=3)
-                        sos_val = res_v3.text.strip('[]"') if res_v3.status_code == 200 else "0"
-                        
-                        # Extra poll for V4 if SOS is detected (only if V4 not cached)
-                        map_link = None
-                        
-                        if str(sos_val) in ["1", "255"]:
-                            # Fetch V4 (Google Maps URL) to include in the alert
-                            try:
-                                res_v4 = requests.get(f"{base_url}&V4", timeout=3)
-                                if res_v4.status_code == 200:
-                                    map_link = res_v4.text.strip('[]"')
-                            except:
-                                pass
-                                
-                            print(f"[Blynk Loop] 🔥 SOS Button Pressed for user {user.name} ({user.id})! (Value: {sos_val})")
-                            trigger_hardware_sos(user, source_label='Blynk Cloud Poll', map_url=map_link)
-                        
-                        # 2. GPS LOCATION CHECK (Happens every 125 loops * 0.4s = 50 seconds)
-                        if loop_count % 125 == 0:
-                            res_v1 = requests.get(f"{base_url}&V1", timeout=4)
-                            res_v2 = requests.get(f"{base_url}&V2", timeout=4)
-                            
-                            lat = res_v1.text.strip('[]"') if res_v1.status_code == 200 else None
-                            lon = res_v2.text.strip('[]"') if res_v2.status_code == 200 else None
-                            
-                            if lat and lon and lat != "Invalid" and lon != "Invalid" and float(lat) != 0.0 and float(lon) != 0.0:
-                                user.last_known_location = f"Lat: {lat}, Lon: {lon}"
-                                user.last_updated_at = datetime.now()
-                                print(f"[Blynk Loop] 🌍 GPS Update for user {user.name} ({user.id}): Lat {lat}, Lon {lon}")
-                        
-                        db.session.commit()
-                    except Exception as req_err:
-                        # Log specific debug string for user awareness if blynk connection fails
-                        print(f"[Blynk Loop] Request error for {user.name} at V3: {req_err}")
-                        
-            except Exception as e:
-                print(f"Blynk loop error: {e}")
-                
-        loop_count += 1
-        time.sleep(0.4) # Accelerated 400ms micro-poll to catch unmodified Arduino 1.2s momentary pulses
-
 def serial_monitor_loop():
     """Reads directly from the ESP32 over USB at 115200 baud for absolute 0-latency alerts, auto-detecting COM port."""
     try:
@@ -2917,7 +3029,8 @@ def start_background_threads():
             return
         app.threads_started = True
         threading.Thread(target=anomaly_loop, daemon=True).start()
-        threading.Thread(target=blynk_loop, daemon=True).start()
+        # The tracker now writes to ThingSpeak instead of Blynk.
+        threading.Thread(target=thingspeak_loop, daemon=True).start()
         threading.Thread(target=serial_monitor_loop, daemon=True).start()
         threading.Thread(target=rakesh_db_agent, daemon=True).start()
         print("[Agent Rakesh] 🕶️ Activated. Monitoring Supabase health in background...")

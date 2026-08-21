@@ -6,8 +6,52 @@
   <link rel="stylesheet" href="/static/admin_dashboard.css">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    .ts-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+    .ts-head h3 { font-size:1rem; margin:0; }
+    .ts-channel { color:var(--text3); font-weight:400; font-size:0.82rem; }
+    .ts-head-right { display:flex; align-items:center; gap:8px; }
+    .ts-pill { font-size:0.72rem; padding:4px 11px; border-radius:20px; border:1px solid rgba(148,163,184,0.3); color:var(--text3); white-space:nowrap; }
+    .ts-pill.ok   { color:#4ade80; border-color:rgba(74,222,128,0.4); background:rgba(74,222,128,0.08); }
+    .ts-pill.bad  { color:#f87171; border-color:rgba(248,113,113,0.4); background:rgba(248,113,113,0.08); }
+    .ts-pill.warn { color:#fbbf24; border-color:rgba(251,191,36,0.4); background:rgba(251,191,36,0.08); }
+    .ts-btn { font-size:0.74rem; padding:5px 12px; border-radius:8px; cursor:pointer;
+              border:1px solid rgba(148,163,184,0.35); background:rgba(148,163,184,0.1); color:var(--text2, #cbd5e1); font-family:inherit; }
+    .ts-btn:hover { background:rgba(148,163,184,0.2); }
+    .ts-btn.armed { color:#4ade80; border-color:rgba(74,222,128,0.45); background:rgba(74,222,128,0.1); }
+    .ts-error { color:#fbbf24; font-size:0.82rem; background:rgba(251,191,36,0.08);
+                border:1px solid rgba(251,191,36,0.25); border-radius:8px; padding:9px 12px; margin:0 0 14px; }
+    .ts-metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; }
+    .ts-metric { background:rgba(148,163,184,0.06); border:1px solid rgba(148,163,184,0.12); border-radius:10px; padding:10px 12px; }
+    .ts-metric-label { display:block; font-size:0.68rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text3); margin-bottom:4px; }
+    .ts-metric-val { font-size:0.95rem; font-weight:600; }
+    .ts-metric-val.mono { font-family:monospace; font-size:0.86rem; }
+    .ts-spark-wrap { margin-top:14px; }
+    .ts-spark { display:flex; align-items:flex-end; gap:3px; height:38px; margin-top:6px; }
+    .ts-spark i { flex:1; min-width:3px; border-radius:2px 2px 0 0; background:rgba(74,222,128,0.45); }
+    .ts-spark i.sos { background:#f87171; }
+    .ts-spark i.nofix { background:rgba(148,163,184,0.3); }
+
+    #sos-banner { position:fixed; inset:0 0 auto 0; z-index:99999; display:none;
+                  align-items:center; justify-content:center; gap:16px; flex-wrap:wrap;
+                  padding:16px 20px; background:linear-gradient(90deg,#7f1d1d,#dc2626);
+                  color:#fff; font-weight:700; box-shadow:0 6px 30px rgba(220,38,38,0.5);
+                  animation:sosFlash 1s steps(1) infinite; }
+    #sos-banner.show { display:flex; }
+    @keyframes sosFlash { 0%,100%{filter:brightness(1)} 50%{filter:brightness(1.45)} }
+    #sos-banner button { font-family:inherit; font-weight:700; font-size:0.84rem; cursor:pointer;
+                         padding:8px 18px; border-radius:8px; border:none; background:#fff; color:#b91c1c; }
+    @media (prefers-reduced-motion: reduce) { #sos-banner { animation:none; } }
+  </style>
 </head>
 <body class="admin-page" data-lang="en">
+  <!-- Emergency banner. Declared before the dashboard script so its
+       Acknowledge handler can bind at parse time. -->
+  <div id="sos-banner" role="alert" aria-live="assertive">
+    <span id="sos-banner-text">🚨 Emergency SOS</span>
+    <button id="sos-ack">Acknowledge</button>
+  </div>
+
   <!-- Gita Bar -->
   <div class="gita-bar" id="gita-quote-bar">
     <span class="gita-bar-icon">📖</span>
@@ -38,6 +82,33 @@
     <div class="stat-card"><div style="font-size:1.2rem">🔔</div><div class="stat-num" id="stat-alerts" style="color:var(--red)">—</div><div class="stat-label">Total Alerts</div></div>
     <div class="stat-card"><div style="font-size:1.2rem">🤖</div><div class="stat-num" id="stat-anomalies" style="color:var(--ast)">—</div><div class="stat-label">Active Anomalies</div></div>
     <div class="stat-card"><div style="font-size:1.2rem">⚡</div><div class="stat-num" id="stat-critical" style="color:var(--red)">—</div><div class="stat-label">Critical Score (&lt;40)</div></div>
+  </div>
+
+  <!-- ThingSpeak live device telemetry -->
+  <div class="card" id="ts-card">
+    <div class="ts-head">
+      <h3>📶 IoT Tracker — ThingSpeak <span class="ts-channel" id="ts-channel"></span></h3>
+      <div class="ts-head-right">
+        <span class="ts-pill" id="ts-status">Connecting…</span>
+        <button class="ts-btn" id="alarm-arm" title="Browsers block sound until you interact with the page">🔔 Arm alarm</button>
+      </div>
+    </div>
+
+    <p class="ts-error" id="ts-error" hidden></p>
+
+    <div class="ts-metrics">
+      <div class="ts-metric"><span class="ts-metric-label">SOS state</span><span class="ts-metric-val" id="ts-sos">—</span></div>
+      <div class="ts-metric"><span class="ts-metric-label">GPS fix</span><span class="ts-metric-val" id="ts-fix">—</span></div>
+      <div class="ts-metric"><span class="ts-metric-label">Latitude</span><span class="ts-metric-val mono" id="ts-lat">—</span></div>
+      <div class="ts-metric"><span class="ts-metric-label">Longitude</span><span class="ts-metric-val mono" id="ts-lon">—</span></div>
+      <div class="ts-metric"><span class="ts-metric-label">Last packet</span><span class="ts-metric-val" id="ts-seen">—</span></div>
+      <div class="ts-metric"><span class="ts-metric-label">Entry ID</span><span class="ts-metric-val mono" id="ts-entry">—</span></div>
+    </div>
+
+    <div class="ts-spark-wrap">
+      <span class="ts-metric-label">Recent packets (SOS presses in red)</span>
+      <div class="ts-spark" id="ts-spark"></div>
+    </div>
   </div>
 
   <!-- Map -->
@@ -152,8 +223,7 @@ async function refresh() {
     // Audio Alert for New Panics
     const currentSOS = ar.filter(a => a.alert_type.includes('Panic')).length;
     if (window.lastSOSCount !== undefined && currentSOS > window.lastSOSCount && currentSOS > 0) {
-        document.getElementById('sos-audio').play().catch(()=>{}); // Play alert sound
-        alert('🚨 ATTENTION ADMIN: A NEW EMERGENCY SOS WAS JUST TRIGGERED!');
+        raiseSOS('A new emergency SOS was just triggered.');
     }
     window.lastSOSCount = currentSOS;
 
@@ -161,18 +231,164 @@ async function refresh() {
   } catch(e) { console.error('Dashboard refresh failed:', e); }
 }
 
+/* ── ThingSpeak live telemetry ───────────────────────────────────────── */
+let deviceMarker = null;
+
+function setPill(el, text, cls) {
+  el.textContent = text;
+  el.className = 'ts-pill' + (cls ? ' ' + cls : '');
+}
+
+function renderSparkline(entries) {
+  const spark = document.getElementById('ts-spark');
+  if (!entries.length) { spark.innerHTML = ''; return; }
+  spark.innerHTML = entries.map(e => {
+    const cls = e.sos ? 'sos' : (e.located ? '' : 'nofix');
+    const h = e.sos ? 100 : (e.located ? 62 : 26);
+    const when = e.created_at ? new Date(e.created_at).toLocaleTimeString() : '';
+    const label = e.sos ? 'SOS' : (e.located ? 'GPS fix' : 'no fix');
+    return `<i class="${cls}" style="height:${h}%" title="${when} — ${label}"></i>`;
+  }).join('');
+}
+
+async function refreshDevice() {
+  const statusEl = document.getElementById('ts-error');
+  try {
+    const d = await fetch('/api/iot/thingspeak/feed?results=20').then(r => r.json());
+    document.getElementById('ts-channel').textContent = d.channel_id ? `· channel ${d.channel_id}` : '';
+
+    if (!d.connected) {
+      setPill(document.getElementById('ts-status'), 'Not connected', 'bad');
+      statusEl.textContent = d.error || 'Channel unavailable.';
+      statusEl.hidden = false;
+      return;
+    }
+    statusEl.hidden = true;
+
+    const e = d.latest;
+    if (!e) {
+      setPill(document.getElementById('ts-status'), 'No data yet', 'warn');
+      return;
+    }
+
+    // A packet lands every ~20s; treat a long gap as the device being offline.
+    const ageSec = e.created_at ? (Date.now() - new Date(e.created_at).getTime()) / 1000 : Infinity;
+    if (ageSec < 90)       setPill(document.getElementById('ts-status'), 'Device online', 'ok');
+    else if (ageSec < 900) setPill(document.getElementById('ts-status'), 'Idle', 'warn');
+    else                   setPill(document.getElementById('ts-status'), 'Device offline', 'bad');
+
+    document.getElementById('ts-sos').innerHTML = e.sos
+      ? '<span style="color:#f87171">🆘 PRESSED</span>'
+      : '<span style="color:#4ade80">Normal</span>';
+    document.getElementById('ts-fix').innerHTML = e.gps_valid
+      ? '<span style="color:#4ade80">Locked</span>'
+      : '<span style="color:#fbbf24">No lock</span>';
+    document.getElementById('ts-lat').textContent = e.located ? e.lat.toFixed(6) : '—';
+    document.getElementById('ts-lon').textContent = e.located ? e.lon.toFixed(6) : '—';
+    document.getElementById('ts-seen').textContent = e.created_at
+      ? new Date(e.created_at).toLocaleTimeString() : '—';
+    document.getElementById('ts-entry').textContent = e.entry_id ?? '—';
+
+    renderSparkline(d.entries || []);
+
+    if (e.located) {
+      const pos = [e.lat, e.lon];
+      if (!deviceMarker) {
+        deviceMarker = L.circleMarker(pos, {
+          radius: 9, color: '#38bdf8', fillColor: '#38bdf8', fillOpacity: 0.85, weight: 3,
+        }).addTo(adminMap);
+      } else {
+        deviceMarker.setLatLng(pos);
+      }
+      deviceMarker.bindPopup(
+        `<b>📶 IoT Tracker</b><br>${e.lat.toFixed(5)}, ${e.lon.toFixed(5)}` +
+        `<br>${e.sos ? '🆘 SOS ACTIVE' : 'Normal'}`
+      );
+    }
+  } catch (err) {
+    console.error('Device refresh failed:', err);
+  }
+}
+
 refresh();
+refreshDevice();
 setInterval(refresh, 10000);
+setInterval(refreshDevice, 10000);
+
+/* ── Alarm ──────────────────────────────────────────────────────────────
+   The siren is synthesised with the Web Audio API rather than loaded as an
+   mp3, so it needs no external asset and cannot be blocked by an ad-blocker.
+   Browsers refuse to start audio until the page has been interacted with,
+   which is why the alarm needs arming — the button doubles as proof to the
+   operator that sound actually works on this machine.                     */
+let audioCtx = null;
+let sirenTimer = null;
+
+function alarmReady() { return audioCtx && audioCtx.state === 'running'; }
+
+function beep(freq, startAt, duration) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(freq, startAt);
+  // Ramp the edges so it reads as a siren rather than a click.
+  gain.gain.setValueAtTime(0.0001, startAt);
+  gain.gain.exponentialRampToValueAtTime(0.28, startAt + 0.04);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(startAt);
+  osc.stop(startAt + duration + 0.02);
+}
+
+function sirenSweep() {
+  if (!alarmReady()) return;
+  const t = audioCtx.currentTime;
+  beep(880, t, 0.32);
+  beep(660, t + 0.38, 0.32);
+}
+
+function startSiren() {
+  if (!alarmReady() || sirenTimer) return;
+  sirenSweep();
+  sirenTimer = setInterval(sirenSweep, 800);
+}
+
+function stopSiren() {
+  if (sirenTimer) { clearInterval(sirenTimer); sirenTimer = null; }
+}
+
+const armBtn = document.getElementById('alarm-arm');
+armBtn.addEventListener('click', async () => {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  await audioCtx.resume();
+  armBtn.classList.add('armed');
+  armBtn.textContent = '🔔 Alarm armed';
+  sirenSweep(); // audible confirmation
+});
+
+function raiseSOS(message) {
+  const banner = document.getElementById('sos-banner');
+  document.getElementById('sos-banner-text').textContent = '🚨 ' + message;
+  banner.classList.add('show');
+  startSiren();
+  if (!alarmReady()) {
+    armBtn.textContent = '🔇 Click to enable sound';
+    armBtn.classList.remove('armed');
+  }
+}
+
+document.getElementById('sos-ack').addEventListener('click', () => {
+  stopSiren();
+  document.getElementById('sos-banner').classList.remove('show');
+});
 </script>
-<audio id="sos-audio" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
 
 <!-- ZERO-LATENCY HARDWARE SOS LISTENER -->
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 <script>
   const socket = io();
   socket.on('hardware_sos_triggered', function(data) {
-      document.getElementById('sos-audio').play().catch(()=>{}); // Play alert sound immediately
-      alert('🚨 ATTENTION ADMIN: A NEW EMERGENCY SOS WAS JUST TRIGGERED BY TOURIST ID ' + data.tourist_id + '!');
+      raiseSOS('Hardware SOS from tourist ID ' + data.tourist_id + '.');
       refresh(); // Immediately fetch the new alert into the list, bypassing the 10-second lag
   });
 </script>
