@@ -21,6 +21,15 @@ services:
         sync: false
       - key: TWILIO_PHONE_NUMBER
         sync: false
+      # ThingSpeak IoT tracker. The channel is private, so the poller needs
+      # the channel's Read API Key — set it in the Render dashboard.
+      - key: THINGSPEAK_CHANNEL_ID
+        value: "3465207"
+      - key: THINGSPEAK_READ_API_KEY
+        sync: false
+      - key: THINGSPEAK_POLL_SECONDS
+        value: "10"
+      # Blynk is no longer polled; kept for the legacy webhook endpoint.
       - key: BLYNK_AUTH_TOKEN
         sync: false
       - key: BLYNK_TEMPLATE_ID
