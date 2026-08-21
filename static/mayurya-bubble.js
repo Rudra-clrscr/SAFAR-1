@@ -12,13 +12,17 @@
     return;
   }
 
-  // ── Session ID (persists across pages for n8n memory) ────────────────────
+  // ── Session ID (persists across pages, keys server-side memory) ──────────
+  function newSessionId() {
+    return (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+
   function getSessionId() {
     let sid = localStorage.getItem('mayurya_session_id');
     if (!sid) {
-      sid = (typeof crypto !== 'undefined' && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2) + Date.now().toString(36);
+      sid = newSessionId();
       localStorage.setItem('mayurya_session_id', sid);
     }
     return sid;
@@ -38,7 +42,9 @@
       .replace(/^[-•]\s+(.+)$/gm, '<li>$1</li>')
       .replace(/(<li>[\s\S]*?<\/li>\n?)+/g, (m) => `<ul>${m}</ul>`)
       .replace(/^---$/gm, '<hr>')
-      .replace(/\n\n/g, '</p><p>')
+      // The bubble background lives on the <p> itself, so a split would
+      // render one reply as two stacked boxes.
+      .replace(/\n{2,}/g, '<br><br>')
       .replace(/\n/g, '<br>');
   }
 
@@ -160,6 +166,16 @@
     .mb-msg p hr { border: none; border-top: 1px solid rgba(255,255,255,.1); margin: 6px 0; }
     .mb-msg small { font-size: .6rem; color: rgba(255,255,255,.25); margin-top: 3px; padding: 0 3px; }
 
+    .mb-action {
+      align-self: flex-start; text-decoration: none;
+      font-size: .76rem; font-weight: 600; padding: 8px 14px;
+      border-radius: 11px; color: #fff;
+      background: linear-gradient(135deg, #0e9e8a, #09756a);
+      box-shadow: 0 3px 14px rgba(14,158,138,.35);
+      transition: transform .15s, box-shadow .15s;
+    }
+    .mb-action:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(14,158,138,.5); }
+
     .mb-typing-wrap { align-self: flex-start; }
     .mb-typing {
       display: flex; align-items: center; gap: 4px;
@@ -269,7 +285,6 @@
   // ── State ─────────────────────────────────────────────────────────────────
   let isOpen    = false;
   let isWaiting = false;
-  const SESSION_ID = getSessionId();
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function appendMsg(text, who) {
@@ -283,6 +298,17 @@
     ts.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     wrap.appendChild(ts);
     msgBox.appendChild(wrap);
+    msgBox.scrollTop = msgBox.scrollHeight;
+  }
+
+  // Mayurya can offer a button that jumps to the page it just talked about.
+  function appendAction(action) {
+    if (!action || action.type !== 'navigate' || !action.url) return;
+    const link = document.createElement('a');
+    link.className = 'mb-action';
+    link.href = action.url;
+    link.textContent = action.label || 'Open';
+    msgBox.appendChild(link);
     msgBox.scrollTop = msgBox.scrollHeight;
   }
 
@@ -341,7 +367,7 @@
       const res = await fetch('/api/chatbot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, session_id: SESSION_ID }),
+        body: JSON.stringify({ message: text, session_id: getSessionId() }),
       });
       hideTyping();
 
@@ -352,6 +378,7 @@
 
       const data = await res.json();
       appendMsg(data.response || "I'm ready to help with your travel questions.", 'bot');
+      appendAction(data.action);
     } catch (_) {
       hideTyping();
       appendMsg('Connection issue detected. Please try again in a moment.', 'bot');
@@ -365,6 +392,8 @@
   closeBtn.addEventListener('click', closePanel);
 
   clearBtn.addEventListener('click', () => {
+    // A fresh session id is what drops the server-side conversation memory.
+    localStorage.setItem('mayurya_session_id', newSessionId());
     msgBox.innerHTML = '';
     appendMsg("Chat cleared. What can I help you with?", 'bot');
   });

@@ -397,10 +397,21 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  function applySearchFromQueryString() {
+    const requested = new URLSearchParams(window.location.search).get('q');
+    if (!requested || !searchInput) return;
+    searchInput.value = requested;
+    if (typeFilter) typeFilter.value = 'All';
+    focusSection('explore');
+    pulseTarget('explore');
+    jumpTargets.explore?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   window.addEventListener('hashchange', syncSectionFromHash);
   syncSectionFromHash();
   bindCoverFallbacks();
   setPreviewBackdrop(defaultPreviewImage);
+  applySearchFromQueryString();
   applyFilters();
 
   if (hero && heroBg && !prefersReducedMotion) {

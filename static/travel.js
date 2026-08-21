@@ -142,16 +142,31 @@ document.addEventListener('DOMContentLoaded', () => {
     if (indicator) indicator.remove();
   }
 
-  // ── Persistent session ID for n8n memory ──────────────────────────────
+  // ── Persistent session ID keying Mayurya's server-side memory ─────────
+  function newSessionId() {
+    return (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+
   function getSessionId() {
     let sid = localStorage.getItem('mayurya_session_id');
     if (!sid) {
-      sid = (typeof crypto !== 'undefined' && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2) + Date.now().toString(36);
+      sid = newSessionId();
       localStorage.setItem('mayurya_session_id', sid);
     }
     return sid;
+  }
+
+  // Mayurya can offer a button that jumps to the page it just talked about.
+  function appendAction(action) {
+    if (!msgBox || !action || action.type !== 'navigate' || !action.url) return;
+    const link = document.createElement('a');
+    link.className = 'chat-action';
+    link.href = action.url;
+    link.textContent = action.label || 'Open';
+    msgBox.appendChild(link);
+    msgBox.scrollTop = msgBox.scrollHeight;
   }
 
   async function getBotResponse(message) {
@@ -186,6 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const payload = await response.json();
       appendMsg(payload.response || 'I am ready to help with your next travel question.', 'bot');
+      appendAction(payload.action);
     } catch (_) {
       hideTyping();
       appendMsg('Connection issue detected. Please try again in a moment.', 'bot');
@@ -222,6 +238,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (clearBtn && msgBox) {
     clearBtn.addEventListener('click', () => {
+      // A fresh session id is what drops the server-side conversation memory.
+      localStorage.setItem('mayurya_session_id', newSessionId());
       msgBox.innerHTML = '';
       appendMsg('Chat cleared. Ask Mayurya anything.', 'bot');
     });

@@ -1199,14 +1199,253 @@ MAYURYA_SYSTEM_PROMPT = (
     "(at /groups), a safety dashboard with live GPS tracking, geo-fenced safety zones, anomaly "
     "detection and a one-tap panic button (at /profile), and a blockchain-backed identity "
     "ledger (at /blockchain). Keep answers concise, warm, and focused on travel in India "
-    "unless the user asks otherwise."
+    "unless the user asks otherwise.\n\n"
+    "You have tools that read this SAFAR installation's live data. Prefer them over guessing: "
+    "never invent group names, member counts or safety scores. When a request is too vague to "
+    "act on, ask one short clarifying question first rather than calling a tool with a guess. "
+    "Once you know what the user wants, call open_page to hand them a button that takes them "
+    "straight there, and mention the button in your reply."
 )
+
+# Conversation memory. Each browser keeps a session_id in localStorage and sends it
+# with every message; history lives here so the client cannot rewrite past turns.
+CHAT_HISTORY_TURNS = 12          # user+model entries retained per session
+CHAT_SESSION_TTL = 2 * 60 * 60   # seconds a session survives without a message
+CHAT_MAX_SESSIONS = 500
+CHAT_MAX_TOOL_ROUNDS = 3
+
+_chat_sessions = {}
+_chat_sessions_lock = threading.Lock()
+
+
+def _chat_history_load(session_id: str) -> list:
+    now = time.time()
+    with _chat_sessions_lock:
+        for stale in [s for s, v in _chat_sessions.items() if now - v['touched'] > CHAT_SESSION_TTL]:
+            del _chat_sessions[stale]
+        entry = _chat_sessions.get(session_id)
+        return list(entry['turns']) if entry else []
+
+
+def _chat_history_save(session_id: str, turns: list):
+    with _chat_sessions_lock:
+        if session_id not in _chat_sessions and len(_chat_sessions) >= CHAT_MAX_SESSIONS:
+            oldest = min(_chat_sessions, key=lambda s: _chat_sessions[s]['touched'])
+            del _chat_sessions[oldest]
+        _chat_sessions[session_id] = {
+            'turns': turns[-CHAT_HISTORY_TURNS:],
+            'touched': time.time(),
+        }
+
+
+MAYURYA_PAGES = {
+    'groups': '/groups',
+    'profile': '/profile',
+    'travel': '/travel',
+    'blockchain': '/blockchain',
+    'dashboard': '/user',
+}
+
+MAYURYA_TOOLS = [{
+    'function_declarations': [
+        {
+            'name': 'search_travel_groups',
+            'description': (
+                'Search the travel groups that exist on this SAFAR installation, by destination, '
+                'group name or trip description. Returns only public groups plus groups the '
+                'signed-in user already belongs to.'
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'query': {
+                        'type': 'string',
+                        'description': 'Destination, group name or theme to match, e.g. "Jaipur".',
+                    },
+                    'group_type': {
+                        'type': 'string',
+                        'enum': ['Any', 'Public', 'Private'],
+                        'description': 'Restrict to a group type. Defaults to Any.',
+                    },
+                },
+                'required': ['query'],
+            },
+        },
+        {
+            'name': 'get_popular_destinations',
+            'description': 'List the destinations with the most active travel groups on SAFAR right now.',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'limit': {'type': 'integer', 'description': 'How many destinations to return (1-10).'},
+                },
+            },
+        },
+        {
+            'name': 'get_my_safety_status',
+            'description': (
+                "Read the signed-in user's own Garuda safety profile: safety score, last known "
+                'location and trip end date. Use when they ask about their own safety or tracking.'
+            ),
+        },
+        {
+            'name': 'open_page',
+            'description': (
+                'Give the user a button that opens a SAFAR page, optionally with the group search '
+                'box pre-filled. Call this once you know where the user wants to go.'
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'page': {
+                        'type': 'string',
+                        'enum': list(MAYURYA_PAGES),
+                        'description': 'Which SAFAR page to open.',
+                    },
+                    'search': {
+                        'type': 'string',
+                        'description': 'Group search term to pre-fill. Only applies to the groups page.',
+                    },
+                    'label': {
+                        'type': 'string',
+                        'description': 'Short button text, e.g. "Browse Jaipur circles".',
+                    },
+                },
+                'required': ['page', 'label'],
+            },
+        },
+    ],
+}]
+
+
+def _mayurya_tool_search_groups(args, user, actions):
+    query = (args.get('query') or '').strip().lower()
+    group_type = args.get('group_type') or 'Any'
+
+    member_ids = {m.group_id for m in user.memberships} if user else set()
+    rows = Group.query.order_by(Group.created_at.desc()).all()
+
+    matches = []
+    for group in rows:
+        if group.group_type != 'Public' and group.id not in member_ids:
+            continue
+        if group_type in ('Public', 'Private') and group.group_type != group_type:
+            continue
+        destination = group.destination.name if group.destination else ''
+        haystack = f'{group.name} {destination} {group.description or ""}'.lower()
+        if query and query not in haystack:
+            continue
+        matches.append({
+            'name': group.name,
+            'destination': destination or 'Not set',
+            'type': group.group_type,
+            'members': f'{group.member_count} of {group.max_members}',
+            'already_a_member': group.id in member_ids,
+        })
+        if len(matches) >= 8:
+            break
+
+    return {'match_count': len(matches), 'groups': matches}
+
+
+def _mayurya_tool_popular_destinations(args, user, actions):
+    from sqlalchemy import func
+    try:
+        limit = int(args.get('limit') or 5)
+    except (TypeError, ValueError):
+        limit = 5
+    rows = (
+        db.session.query(Destination.name, func.count(Group.id).label('cnt'))
+        .join(Group, Group.destination_id == Destination.id)
+        .group_by(Destination.name)
+        .order_by(func.count(Group.id).desc())
+        .limit(max(1, min(limit, 10)))
+        .all()
+    )
+    return {'destinations': [{'name': r.name, 'group_count': r.cnt} for r in rows]}
+
+
+def _mayurya_tool_my_safety_status(args, user, actions):
+    if not user:
+        return {'signed_in': False, 'note': 'Nobody is signed in, so there is no safety profile to read.'}
+
+    tourist = Tourist.query.filter_by(user_id=user.id).first()
+    if not tourist:
+        return {
+            'registered': False,
+            'note': 'This user has no Garuda safety profile yet. They can create one on the profile page.',
+        }
+    return {
+        'registered': True,
+        'safety_score': tourist.safety_score,
+        'last_known_location': tourist.last_known_location or 'No location shared yet',
+        'trip_ends': tourist.visit_end_date.isoformat(),
+        'last_updated_at': tourist.last_updated_at.isoformat(),
+    }
+
+
+def _mayurya_tool_open_page(args, user, actions):
+    from urllib.parse import quote
+
+    page = (args.get('page') or '').strip().lower()
+    path = MAYURYA_PAGES.get(page)
+    if not path:
+        return {'ok': False, 'error': f'Unknown page "{page}".'}
+
+    search = (args.get('search') or '').strip()
+    if search and page == 'groups':
+        path = f'{path}?q={quote(search[:80])}'
+
+    actions.append({'type': 'navigate', 'url': path, 'label': (args.get('label') or 'Open').strip()[:60]})
+    return {'ok': True, 'note': 'A button to this page is now shown under your reply.'}
+
+
+MAYURYA_TOOL_IMPLS = {
+    'search_travel_groups': _mayurya_tool_search_groups,
+    'get_popular_destinations': _mayurya_tool_popular_destinations,
+    'get_my_safety_status': _mayurya_tool_my_safety_status,
+    'open_page': _mayurya_tool_open_page,
+}
+
+
+def _mayurya_run_tool(name, args, user, actions) -> dict:
+    impl = MAYURYA_TOOL_IMPLS.get(name)
+    if not impl:
+        return {'error': f'Unknown tool "{name}".'}
+    try:
+        return impl(args, user, actions)
+    except Exception as exc:
+        print(f'[Chatbot] Tool {name} failed: {exc}')
+        return {'error': 'That lookup failed. Answer from general knowledge instead.'}
+
+
+def _mayurya_generate(contents, with_tools: bool) -> dict:
+    body = {
+        'system_instruction': {'parts': [{'text': MAYURYA_SYSTEM_PROMPT}]},
+        'contents': contents,
+    }
+    if with_tools:
+        body['tools'] = MAYURYA_TOOLS
+
+    response = requests.post(
+        GEMINI_API_URL,
+        json=body,
+        headers={
+            'Content-Type': 'application/json',
+            'x-goog-api-key': GEMINI_API_KEY,
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
+
 
 @app.route('/api/chatbot', methods=['POST'])
 def api_chatbot():
-    """Send a chat message to the Gemini API and return Mayurya's reply."""
+    """Answer a chat message with Gemini, using session memory and live SAFAR data."""
     data = request.get_json(silent=True) or {}
-    message = (data.get('message') or '').strip()
+    message = (data.get('message') or '').strip()[:2000]
+    session_id = (data.get('session_id') or '').strip()[:64]
 
     if not message:
         return jsonify({'error': 'message is required'}), 400
@@ -1214,30 +1453,47 @@ def api_chatbot():
     if not GEMINI_API_KEY:
         return jsonify({'error': 'Chatbot backend is not configured.'}), 503
 
-    try:
-        gemini_response = requests.post(
-            GEMINI_API_URL,
-            json={
-                'system_instruction': {'parts': [{'text': MAYURYA_SYSTEM_PROMPT}]},
-                'contents': [{'role': 'user', 'parts': [{'text': message}]}],
-            },
-            headers={
-                'Content-Type': 'application/json',
-                'x-goog-api-key': GEMINI_API_KEY,
-            },
-            timeout=30,
-        )
-        gemini_response.raise_for_status()
-        payload = gemini_response.json()
+    user = get_current_user()
+    history = _chat_history_load(session_id) if session_id else []
+    contents = history + [{'role': 'user', 'parts': [{'text': message}]}]
+    actions = []
+    reply = ''
 
-        try:
-            reply = payload['candidates'][0]['content']['parts'][0]['text']
-        except (KeyError, IndexError, TypeError):
-            block_reason = payload.get('promptFeedback', {}).get('blockReason')
-            print(f'[Chatbot] Gemini returned no usable candidate (blockReason={block_reason}): {str(payload)[:300]}')
+    try:
+        # One extra round with tools switched off guarantees a text answer at the end.
+        for round_index in range(CHAT_MAX_TOOL_ROUNDS + 1):
+            payload = _mayurya_generate(contents, with_tools=round_index < CHAT_MAX_TOOL_ROUNDS)
+            candidates = payload.get('candidates') or []
+            if not candidates:
+                block_reason = payload.get('promptFeedback', {}).get('blockReason')
+                print(f'[Chatbot] Gemini returned no usable candidate (blockReason={block_reason}): {str(payload)[:300]}')
+                break
+
+            parts = candidates[0].get('content', {}).get('parts') or []
+            calls = [p['functionCall'] for p in parts if isinstance(p, dict) and 'functionCall' in p]
+
+            if not calls:
+                reply = ''.join(p['text'] for p in parts if isinstance(p, dict) and 'text' in p).strip()
+                break
+
+            contents.append({'role': 'model', 'parts': parts})
+            contents.append({'role': 'user', 'parts': [{
+                'functionResponse': {
+                    'name': call.get('name'),
+                    'response': _mayurya_run_tool(call.get('name'), call.get('args') or {}, user, actions),
+                },
+            } for call in calls]})
+
+        if not reply:
             reply = "I can help with destinations, itineraries, safety tips, and trip planning. Could you rephrase that?"
 
-        return jsonify({'response': reply})
+        if session_id:
+            _chat_history_save(session_id, history + [
+                {'role': 'user', 'parts': [{'text': message}]},
+                {'role': 'model', 'parts': [{'text': reply}]},
+            ])
+
+        return jsonify({'response': reply, 'action': actions[0] if actions else None})
 
     except requests.Timeout:
         print('[Chatbot] Gemini request timed out after 30s')

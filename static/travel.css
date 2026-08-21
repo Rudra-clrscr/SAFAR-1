@@ -1948,6 +1948,24 @@ footer p {
   box-shadow: 0 3px 10px var(--tt-glow)
 }
 
+.chat-action {
+  align-self: flex-start;
+  text-decoration: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 8px 15px;
+  border-radius: 12px;
+  color: var(--bg);
+  background: linear-gradient(135deg, var(--tt), var(--tt2));
+  box-shadow: 0 3px 12px var(--tt-glow);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.chat-action:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px var(--tt-glow);
+}
+
 .typing-dots {
   display: flex;
   align-items: center;
