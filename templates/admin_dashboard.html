@@ -79,7 +79,7 @@
   <!-- Stats row -->
   <div class="stats-row" id="stats-row">
     <div class="stat-card card-ast"><div style="font-size:1.2rem">🧑‍💼</div><div class="stat-num tt-text" id="stat-tourists">—</div><div class="stat-label">Active Tourists</div></div>
-    <div class="stat-card"><div style="font-size:1.2rem">🔔</div><div class="stat-num" id="stat-alerts" style="color:var(--red)">—</div><div class="stat-label">Total Alerts</div></div>
+    <div class="stat-card"><div style="font-size:1.2rem">🔔</div><div class="stat-num" id="stat-alerts" style="color:var(--red)">—</div><div class="stat-label">Recent Alerts</div></div>
     <div class="stat-card"><div style="font-size:1.2rem">🤖</div><div class="stat-num" id="stat-anomalies" style="color:var(--ast)">—</div><div class="stat-label">Active Anomalies</div></div>
     <div class="stat-card"><div style="font-size:1.2rem">⚡</div><div class="stat-num" id="stat-critical" style="color:var(--red)">—</div><div class="stat-label">Critical Score (&lt;40)</div></div>
   </div>
@@ -151,12 +151,20 @@ const adminMap = L.map('adminMap').setView([22.57, 88.36], 5);
 let touristMarkers = L.layerGroup().addTo(adminMap);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '© CARTO', maxZoom: 20 }).addTo(adminMap);
 
+// last_known_location is stored in more than one shape: "Lat: 28.36, Lon: 79.46"
+// from the IoT writers, a bare "35.67, 139.65" from seeded/manual rows, and
+// "Not Available". Pulling the first two numbers handles all three. The old
+// split(':')[1] version returned [NaN, NaN] for the bare form — truthy, so it
+// reached L.marker(), which threw and aborted the whole refresh.
 function parseLocation(s) {
   if (!s) return null;
-  try {
-    const parts = s.split(',');
-    return [parseFloat(parts[0].split(':')[1]), parseFloat(parts[1].split(':')[1])];
-  } catch { return null; }
+  const nums = String(s).match(/-?\d+(?:\.\d+)?/g);
+  if (!nums || nums.length < 2) return null;
+  const lat = parseFloat(nums[0]);
+  const lon = parseFloat(nums[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  return [lat, lon];
 }
 
 function scoreColor(s) { return s < 40 ? '#f87171' : s < 70 ? '#fbbf24' : '#4ade80'; }
@@ -181,7 +189,14 @@ async function refresh() {
     tbody.innerHTML = tr.map(t => {
       const c = scoreColor(t.safety_score);
       const loc = parseLocation(t.last_known_location);
-      if (loc) L.marker(loc).addTo(touristMarkers).bindPopup(`<b>${t.name}</b><br>Score: ${t.safety_score}`);
+      // Never let one unmappable row abort the rest of the refresh.
+      if (loc) {
+        try {
+          L.marker(loc).addTo(touristMarkers).bindPopup(`<b>${t.name}</b><br>Score: ${t.safety_score}`);
+        } catch (err) {
+          console.warn('Skipped marker for', t.name, t.last_known_location, err);
+        }
+      }
       return `<tr>
         <td>${t.name}</td>
         <td><strong style="color:${c}">${t.safety_score}/100</strong></td>
