@@ -17,9 +17,6 @@ pg8000>=1.31.2
 # Environment variables
 python-dotenv==1.0.1
 
-# SMS (OTP alerts) — optional, gracefully handled if missing
-twilio==9.1.0
-
 # Anomaly Detection algorithm
 # scikit-learn==1.5.2
 # numpy==2.1.3

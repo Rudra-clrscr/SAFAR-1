@@ -15,7 +15,7 @@
 | 🧭 **TravelTogether** | Create and join travel groups, plan destinations, and chat in real time |
 | 🛡️ **Garuda Safety** | Register tourists, track GPS locations, enforce geo-fences, detect anomalies, and trigger emergency alerts |
 
-Optional add-ons include IoT device tracking (Arduino + Blynk), SMS notifications (Twilio), and a blockchain audit layer.
+Optional add-ons include IoT device tracking (Arduino + Blynk) and a blockchain audit layer. Email verification is handled by Supabase Auth.
 
 ---
 
@@ -53,7 +53,7 @@ Optional add-ons include IoT device tracking (Arduino + Blynk), SMS notification
 | Service | Purpose |
 |---|---|
 | **Supabase** | Managed PostgreSQL database + connection pooling |
-| **Twilio** | SMS-based OTP verification and emergency alerts *(optional)* |
+| **Supabase Auth** | Emailed one-time codes for signup and passwordless login |
 | **Blynk** | IoT device communication for GPS trackers *(optional)* |
 | **Cloudflare Tunnel** | Secure HTTPS tunneling for local/edge deployments |
 
@@ -75,7 +75,7 @@ Optional add-ons include IoT device tracking (Arduino + Blynk), SMS notification
 
 ## Features
 
-- 🔐 **Authentication** — Registration, login, and OTP verification (Twilio SMS or console fallback)
+- 🔐 **Authentication** — Registration, password login, and Supabase email-code verification (console fallback in dev)
 - 🗺️ **Travel Groups** — Create / join groups, manage destinations, invite members
 - 💬 **Real-time Chat** — In-group messaging powered by WebSockets
 - 📍 **Safety Tracking** — Tourist registration, live GPS tracking, safety zone monitoring
@@ -131,7 +131,7 @@ SAFAR-1/
 
 - Python 3.11+
 - A [Supabase](https://supabase.com) project (or local PostgreSQL)
-- *(Optional)* Twilio account for SMS OTP
+- A Supabase project (also used for email verification codes)
 - *(Optional)* Blynk account for IoT tracking
 
 ### 1. Clone & Install
@@ -159,11 +159,11 @@ ALLOW_SQLITE_FALLBACK=0
 DATABASE_URL=postgresql+pg8000://postgres.<project-ref>:<password>@aws-<region>.pooler.supabase.com:5432/postgres
 DB_CONNECT_TIMEOUT=20
 
-# ── Twilio (optional) ─────────────────────────────────────────────────────────
-# If omitted, OTPs are printed to the console instead of being sent via SMS.
-TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-TWILIO_AUTH_TOKEN=your_auth_token
-TWILIO_PHONE_NUMBER=+1234567890
+# ── Supabase Auth (email verification) ────────────────────────────────────────
+# If either is omitted, verification codes are printed to the console instead
+# of being emailed — dev only.
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_KEY=your_publishable_or_anon_key
 
 # ── Blynk / IoT (optional) ────────────────────────────────────────────────────
 # If omitted, the IoT polling loop is disabled.
@@ -217,7 +217,7 @@ The `Dockerfile` uses a multi-stage build to keep the final image lean (Python 3
 | Prefix | Area |
 |---|---|
 | `/api/auth/...` | Registration, login, logout |
-| `/api/otp/...` | OTP generation & verification |
+| `/api/auth/email/...` | Emailed verification codes (Supabase Auth) |
 | `/api/tt/...` | TravelTogether — groups & destinations |
 | `/api/safety/...` | Garuda Safety — tracking & alerts |
 | `/api/admin/...` | Admin controls |
@@ -228,7 +228,9 @@ The `Dockerfile` uses a multi-stage build to keep the final image lean (Python 3
 
 - Special characters in the database password are fully supported via URL encoding in `DATABASE_URL`.
 - SQLite fallback is available for local development only (`ALLOW_SQLITE_FALLBACK=1`). **Do not enable in production.**
-- If Twilio is not configured, OTPs are printed to the server console — useful for development.
+- If `SUPABASE_URL` / `SUPABASE_KEY` are not configured, verification codes are printed to the server console — useful for development.
+- Supabase sends the code using the **Magic Link** email template, which must contain `{{ .Token }}` for a numeric code to appear. Codes expire after 1 hour and can be re-requested once every 60 seconds.
+- Supabase's built-in email sender is rate limited; configure custom SMTP in the Supabase dashboard before real traffic.
 - The IoT polling loop is only active when `BLYNK_AUTH_TOKEN` is set (either in `.env` or per-user in the database).
 
 ---

@@ -101,14 +101,35 @@
 
         <!-- LOGIN -->
         <div class="auth-panel active" id="panel-login">
-          <form class="auth-form" onsubmit="handleLogin(event)">
-            <div class="form-group"><label><i class="fas fa-user" style="margin-right:5px"></i> Username</label><input type="text" id="l-user" placeholder="Your username"
-                required></div>
-            <div class="form-group"><label><i class="fas fa-lock" style="margin-right:5px"></i> Password</label><input type="password" id="l-pass" placeholder="Your password"
-                required></div>
-            <button type="submit" class="btn btn-tt"
-              style="width:100%;padding:12px;border-radius:var(--radius)"><i class="fas fa-arrow-right" style="margin-right:6px"></i> Login</button>
-          </form>
+          <div id="l-password-mode">
+            <form class="auth-form" onsubmit="handleLogin(event)">
+              <div class="form-group"><label><i class="fas fa-user" style="margin-right:5px"></i> Username</label><input type="text" id="l-user" placeholder="Your username"
+                  required></div>
+              <div class="form-group"><label><i class="fas fa-lock" style="margin-right:5px"></i> Password</label><input type="password" id="l-pass" placeholder="Your password"
+                  required></div>
+              <button type="submit" class="btn btn-tt"
+                style="width:100%;padding:12px;border-radius:var(--radius)"><i class="fas fa-arrow-right" style="margin-right:6px"></i> Login</button>
+            </form>
+            <p style="text-align:center;margin-top:14px;font-size:0.84rem;color:var(--text2)">or <span
+                class="tt-text" style="cursor:pointer;font-weight:600" onclick="showLoginMode('email')">sign in with an email code</span></p>
+          </div>
+
+          <div id="l-email-mode" class="hidden">
+            <form class="auth-form" onsubmit="sendLoginCode(event)" id="l-email-step1">
+              <div class="form-group"><label><i class="fas fa-envelope" style="margin-right:5px"></i> Email</label><input type="email" id="l-email" placeholder="your@email.com"
+                  required></div>
+              <button type="submit" class="btn btn-tt" id="l-email-send-btn"
+                style="width:100%;padding:12px;border-radius:var(--radius)"><i class="fas fa-paper-plane" style="margin-right:6px"></i> Email me a code</button>
+            </form>
+            <form class="auth-form hidden" onsubmit="verifyLoginCode(event)" id="l-email-step2">
+              <div class="flash-msg success" style="margin-bottom:16px">📧 Verification code sent. Check your inbox and spam folder.</div>
+              <div class="form-group"><label>Verification Code</label><input type="text" id="l-code" placeholder="6-digit code" maxlength="6" inputmode="numeric" required></div>
+              <button type="submit" class="btn btn-tt" style="width:100%;padding:12px;border-radius:var(--radius)"><i class="fas fa-check" style="margin-right:6px"></i> Verify & Login</button>
+            </form>
+            <p style="text-align:center;margin-top:14px;font-size:0.84rem;color:var(--text2)">or <span
+                class="tt-text" style="cursor:pointer;font-weight:600" onclick="showLoginMode('password')">use your password</span></p>
+          </div>
+
           <p style="text-align:center;margin-top:16px;font-size:0.84rem;color:var(--text2)">No account? <span
               class="tt-text" style="cursor:pointer;font-weight:600" onclick="switchTab('register')">Join SAFAR</span></p>
         </div>
@@ -117,7 +138,7 @@
         <div class="auth-panel" id="panel-register">
           <div id="r-step1">
             <div style="text-align:center;margin-bottom:16px"><span class="badge badge-ast">🛡️ Account & KYC Registration</span></div>
-            <form class="auth-form" onsubmit="sendRegistrationOTP(event)">
+            <form class="auth-form" onsubmit="sendRegistrationCode(event)">
               <div class="form-group"><label>Full Name</label><input type="text" id="r-name" placeholder="As on ID document" required></div>
               <div class="form-group"><label>Username</label><input type="text" id="r-user" placeholder="Choose username" required></div>
               <div class="form-group"><label>Email</label><input type="email" id="r-email" placeholder="your@email.com" required></div>
@@ -133,16 +154,19 @@
               </div>
               <div class="form-group"><label>KYC Number</label><input type="text" id="r-kyc-id" placeholder="Document number" required></div>
               <div class="form-group"><label>Visit Duration (days)</label><input type="number" id="r-dur" placeholder="e.g. 7" min="1" required></div>
-              <button type="submit" class="btn btn-ast" style="width:100%;padding:12px;border-radius:var(--radius)"><i class="fas fa-paper-plane" style="margin-right:6px"></i> Send OTP to verify</button>
+              <button type="submit" class="btn btn-ast" id="r-send-btn" style="width:100%;padding:12px;border-radius:var(--radius)"><i class="fas fa-paper-plane" style="margin-right:6px"></i> Email me a verification code</button>
             </form>
             <p style="text-align:center;margin-top:16px;font-size:0.84rem;color:var(--text2)">Already a traveler? <span
               class="tt-text" style="cursor:pointer;font-weight:600" onclick="switchTab('login')">Login</span></p>
           </div>
 
           <div id="r-step2" class="hidden">
-            <div class="flash-msg success" style="margin-bottom:16px">📱 OTP sent! Check your SMS or terminal.</div>
-            <form class="auth-form" onsubmit="verifyRegistrationOTP(event)">
-              <div class="form-group"><label>OTP Code</label><input type="text" id="r-otp" placeholder="6-digit code" maxlength="6" required></div>
+            <div class="flash-msg success" style="margin-bottom:16px">
+              <div>📧 Verification code sent. Check your inbox and spam folder.</div>
+              <strong id="r-email-echo" data-no-translate style="display:block;margin-top:4px"></strong>
+            </div>
+            <form class="auth-form" onsubmit="verifyRegistrationCode(event)">
+              <div class="form-group"><label>Verification Code</label><input type="text" id="r-code" placeholder="6-digit code" maxlength="6" inputmode="numeric" required></div>
               <button type="submit" class="btn btn-ast" style="width:100%;padding:12px;border-radius:var(--radius)"><i class="fas fa-check" style="margin-right:6px"></i> Verify & Register</button>
             </form>
             <button
@@ -191,34 +215,91 @@
       r.ok ? showAlert('Welcome back!', d.message, () => window.location.href = '/profile') : showAlert('Login Failed', d.error);
     }
 
-    async function sendRegistrationOTP(e) {
-      e.preventDefault();
-      const phone = document.getElementById('r-phone').value;
-      if (!phone) return showAlert('Error', 'Please enter a valid phone number');
-
-      const r = await fetch('/api/otp/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone }) });
-      const d = await r.json();
-      if (r.ok) { 
-        document.getElementById('r-step1').classList.add('hidden'); 
-        document.getElementById('r-step2').classList.remove('hidden');
-        if (d.dev_otp) showAlert('Twilio Error', `SMS failed (e.g., number not verified in Twilio). Your Dev OTP is: ${d.dev_otp}`);
-      }
-      else showAlert('Error sending OTP', d.error);
+    function showLoginMode(mode) {
+      document.getElementById('l-password-mode').classList.toggle('hidden', mode !== 'password');
+      document.getElementById('l-email-mode').classList.toggle('hidden', mode !== 'email');
     }
 
-    async function verifyRegistrationOTP(e) {
+    // Shared helper: ask Supabase (via the backend) to email a code.
+    async function requestEmailCode(email, purpose, button) {
+      const label = button.innerHTML;
+      button.disabled = true;
+      button.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:6px"></i> Sending…';
+      try {
+        const r = await fetch('/api/auth/email/send-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, purpose })
+        });
+        const d = await r.json();
+        if (!r.ok) { showAlert('Could not send code', d.error); return false; }
+        if (d.dev_mode) showAlert('Dev mode', 'Supabase is not configured, so the code was printed to the server console.');
+        return true;
+      } finally {
+        button.disabled = false;
+        button.innerHTML = label;
+      }
+    }
+
+    async function sendLoginCode(e) {
       e.preventDefault();
-      const phone = document.getElementById('r-phone').value;
-      
-      const v = await fetch('/api/otp/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, otp: document.getElementById('r-otp').value }) });
-      if (!v.ok) { const d = await v.json(); showAlert('OTP Error', d.error); return; }
-      
+      const email = document.getElementById('l-email').value.trim();
+      const sent = await requestEmailCode(email, 'login', document.getElementById('l-email-send-btn'));
+      if (!sent) return;
+      document.getElementById('l-email-step1').classList.add('hidden');
+      document.getElementById('l-email-step2').classList.remove('hidden');
+    }
+
+    async function verifyLoginCode(e) {
+      e.preventDefault();
+      const email = document.getElementById('l-email').value.trim();
+
+      const v = await fetch('/api/auth/email/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code: document.getElementById('l-code').value.trim() })
+      });
+      if (!v.ok) { const d = await v.json(); showAlert('Verification Failed', d.error); return; }
+
+      const r = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const d = await r.json();
+      r.ok ? showAlert('Welcome back!', d.message, () => window.location.href = '/profile') : showAlert('Login Failed', d.error);
+    }
+
+    async function sendRegistrationCode(e) {
+      e.preventDefault();
+      const email = document.getElementById('r-email').value.trim();
+      if (!email) return showAlert('Error', 'Please enter a valid email address');
+
+      const sent = await requestEmailCode(email, 'register', document.getElementById('r-send-btn'));
+      if (!sent) return;
+
+      document.getElementById('r-email-echo').textContent = email;
+      document.getElementById('r-step1').classList.add('hidden');
+      document.getElementById('r-step2').classList.remove('hidden');
+    }
+
+    async function verifyRegistrationCode(e) {
+      e.preventDefault();
+      const email = document.getElementById('r-email').value.trim();
+
+      const v = await fetch('/api/auth/email/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code: document.getElementById('r-code').value.trim() })
+      });
+      if (!v.ok) { const d = await v.json(); showAlert('Verification Failed', d.error); return; }
+
       const regData = {
         name: document.getElementById('r-name').value,
         username: document.getElementById('r-user').value,
-        email: document.getElementById('r-email').value,
+        email: email,
         password: document.getElementById('r-pass').value,
-        phone: phone,
+        phone: document.getElementById('r-phone').value,
         kyc_id: document.getElementById('r-kyc-id').value,
         kyc_type: document.getElementById('r-kyc-type').value,
         visit_duration_days: parseInt(document.getElementById('r-dur').value)

@@ -79,6 +79,7 @@
   <!-- Stats row -->
   <div class="stats-row" id="stats-row">
     <div class="stat-card card-ast"><div style="font-size:1.2rem">🧑‍💼</div><div class="stat-num tt-text" id="stat-tourists">—</div><div class="stat-label">Active Tourists</div></div>
+    <div class="stat-card"><div style="font-size:1.2rem">🟢</div><div class="stat-num" id="stat-online" style="color:#4ade80">—</div><div class="stat-label">Online Devices (ON)</div></div>
     <div class="stat-card"><div style="font-size:1.2rem">🔔</div><div class="stat-num" id="stat-alerts" style="color:var(--red)">—</div><div class="stat-label">Recent Alerts</div></div>
     <div class="stat-card"><div style="font-size:1.2rem">🤖</div><div class="stat-num" id="stat-anomalies" style="color:var(--ast)">—</div><div class="stat-label">Active Anomalies</div></div>
     <div class="stat-card"><div style="font-size:1.2rem">⚡</div><div class="stat-num" id="stat-critical" style="color:var(--red)">—</div><div class="stat-label">Critical Score (&lt;40)</div></div>
@@ -120,7 +121,7 @@
       <h3 style="margin-bottom:16px;font-size:1rem">📡 Live Tourist Feed</h3>
       <div class="table-scroll">
         <table class="data-table">
-          <thead><tr><th>Name</th><th>Safety Score</th><th>Last Location</th><th>Visit Ends</th></tr></thead>
+          <thead><tr><th>Name</th><th>Device & Mode</th><th>Power / Status</th><th>Safety Score</th><th>Last Location</th><th>Visit Ends</th></tr></thead>
           <tbody id="tourist-tbody"></tbody>
         </table>
       </div>
@@ -179,6 +180,9 @@ async function refresh() {
 
     // Stats
     document.getElementById('stat-tourists').textContent = tr.length;
+    if (document.getElementById('stat-online')) {
+        document.getElementById('stat-online').textContent = tr.filter(t=>t.is_online).length;
+    }
     document.getElementById('stat-alerts').textContent = ar.length;
     document.getElementById('stat-anomalies').textContent = an.filter(a=>a.anomaly_type?.includes('active')||true).length;
     document.getElementById('stat-critical').textContent = tr.filter(t=>t.safety_score<40).length;
@@ -192,18 +196,26 @@ async function refresh() {
       // Never let one unmappable row abort the rest of the refresh.
       if (loc) {
         try {
-          L.marker(loc).addTo(touristMarkers).bindPopup(`<b>${t.name}</b><br>Score: ${t.safety_score}`);
+          L.marker(loc).addTo(touristMarkers).bindPopup(`<b>${t.name}</b><br>Score: ${t.safety_score}<br>Status: ${t.is_online?'🟢 ON':'🔴 OFF'}`);
         } catch (err) {
           console.warn('Skipped marker for', t.name, t.last_known_location, err);
         }
       }
+      const deviceIcon = t.iot_mode_enabled ? '📡' : '📱';
+      const modeLabel = t.device_mode || (t.iot_mode_enabled ? 'Fixed IoT Device' : 'Mobile Web App');
+      const statusBadge = t.is_online
+        ? `<span class="ts-pill ok" style="font-size:0.75rem;padding:2px 8px;font-weight:700">🟢 Device ON</span>`
+        : `<span class="ts-pill bad" style="font-size:0.75rem;padding:2px 8px;font-weight:700">🔴 Device OFF</span>`;
+
       return `<tr>
-        <td>${t.name}</td>
+        <td><strong>${t.name}</strong></td>
+        <td style="font-size:0.82rem">${deviceIcon} ${modeLabel}</td>
+        <td>${statusBadge}</td>
         <td><strong style="color:${c}">${t.safety_score}/100</strong></td>
         <td style="font-family:monospace;font-size:0.78rem">${t.last_known_location||'N/A'}</td>
         <td style="font-size:0.8rem">${t.visit_end_date?.slice(0,10)||'—'}</td>
       </tr>`;
-    }).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--text3)">No tourists registered</td></tr>';
+    }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text3)">No tourists registered</td></tr>';
 
     // Anomalies
     const anEl = document.getElementById('anomalies-list');
@@ -235,10 +247,12 @@ async function refresh() {
       </div>`
     }).join('') : '<p style="color:var(--text3);font-size:0.85rem">No alerts recorded</p>';
 
-    // Audio Alert for New Panics
-    const currentSOS = ar.filter(a => a.alert_type.includes('Panic')).length;
+    // Audio Alert for New/Active Panics
+    const currentSOS = ar.filter(a => a.alert_type && (a.alert_type.includes('Panic') || a.alert_type.includes('SOS'))).length;
     if (window.lastSOSCount !== undefined && currentSOS > window.lastSOSCount && currentSOS > 0) {
         raiseSOS('A new emergency SOS was just triggered.');
+    } else if (window.lastSOSCount === undefined && currentSOS > 0) {
+        raiseSOS('Active Emergency SOS detected!');
     }
     window.lastSOSCount = currentSOS;
 
@@ -288,9 +302,9 @@ async function refreshDevice() {
 
     // A packet lands every ~20s; treat a long gap as the device being offline.
     const ageSec = e.created_at ? (Date.now() - new Date(e.created_at).getTime()) / 1000 : Infinity;
-    if (ageSec < 90)       setPill(document.getElementById('ts-status'), 'Device online', 'ok');
-    else if (ageSec < 900) setPill(document.getElementById('ts-status'), 'Idle', 'warn');
-    else                   setPill(document.getElementById('ts-status'), 'Device offline', 'bad');
+    if (ageSec < 90)       setPill(document.getElementById('ts-status'), '🟢 Fixed IoT: Device ON (Active)', 'ok');
+    else if (ageSec < 900) setPill(document.getElementById('ts-status'), '🟡 Fixed IoT: Device ON (Idle)', 'warn');
+    else                   setPill(document.getElementById('ts-status'), '🔴 Fixed IoT: Device OFF (Standby/Offline)', 'bad');
 
     document.getElementById('ts-sos').innerHTML = e.sos
       ? '<span style="color:#f87171">🆘 PRESSED</span>'
@@ -398,12 +412,14 @@ document.getElementById('sos-ack').addEventListener('click', () => {
 });
 </script>
 
-<!-- ZERO-LATENCY HARDWARE SOS LISTENER -->
+<!-- ZERO-LATENCY UNIFIED SOS LISTENER -->
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 <script>
   const socket = io();
   socket.on('hardware_sos_triggered', function(data) {
-      raiseSOS('Hardware SOS from tourist ID ' + data.tourist_id + '.');
+      const src = data.source ? (' via ' + data.source) : '';
+      const name = data.tourist_name ? data.tourist_name : ('tourist ID ' + (data.tourist_id || ''));
+      raiseSOS('Emergency SOS triggered by ' + name + src + '!');
       refresh(); // Immediately fetch the new alert into the list, bypassing the 10-second lag
   });
 </script>

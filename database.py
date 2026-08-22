@@ -93,6 +93,7 @@ class User(db.Model):
     username    = db.Column(db.String(80), unique=True, nullable=False)
     password    = db.Column(db.String(256), nullable=False)   # store hashed
     email       = db.Column(db.String(120), nullable=False)
+    email_verified = db.Column(db.Boolean, default=False)  # proven via Supabase email OTP
     phone       = db.Column(db.String(20))       # shared with Tourist
     gender      = db.Column(db.String(10))
     bio         = db.Column(db.Text)

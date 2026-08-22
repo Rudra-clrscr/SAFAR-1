@@ -1,7 +1,7 @@
 """
 app.py – Combined Backend
   Project 1 : TravelTogether  (groups, destinations, group chat)
-  Project 2 : Astra Safety    (tourist tracking, geo-fencing, anomalies, OTP)
+  Project 2 : Astra Safety    (tourist tracking, geo-fencing, anomalies)
 
 Run locally:
     pip install -r requirements.txt
@@ -33,13 +33,6 @@ load_dotenv()
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from flask_socketio import SocketIO, join_room, leave_room, emit
 from werkzeug.utils import secure_filename
-
-# Optional Twilio
-try:
-    from twilio.rest import Client as TwilioClient
-    TWILIO_ENABLED = True
-except ImportError:
-    TWILIO_ENABLED = False
 
 try:
     from database import (
@@ -87,7 +80,7 @@ if "pg8000" in DATABASE_URL:
     if "sslmode=" in DATABASE_URL:
         DATABASE_URL = re.sub(r'[?&]sslmode=[^&]+', '', DATABASE_URL)
 
-from sqlalchemy import create_engine, text, inspect
+from sqlalchemy import create_engine, text, inspect, func
 from sqlalchemy.exc import (
     DBAPIError, OperationalError, InterfaceError, IntegrityError, PendingRollbackError,
 )
@@ -192,14 +185,13 @@ else:
 db.init_app(app)
 socketio = SocketIO(app, cors_allowed_origins='*', async_mode='threading')
 
-# Twilio setup
-TWILIO_ACCOUNT_SID   = os.environ.get('TWILIO_ACCOUNT_SID')
-TWILIO_AUTH_TOKEN    = os.environ.get('TWILIO_AUTH_TOKEN')
-TWILIO_PHONE_NUMBER  = os.environ.get('TWILIO_PHONE_NUMBER')
-twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) if TWILIO_ENABLED and TWILIO_ACCOUNT_SID else None
-
-# In-memory OTP store  {phone: {otp, timestamp}}
-otp_storage = {}
+# Supabase Auth (email verification codes)
+SUPABASE_URL      = (os.environ.get('SUPABASE_URL') or '').rstrip('/')
+SUPABASE_KEY      = os.environ.get('SUPABASE_KEY') or ''
+SUPABASE_AUTH_URL = f"{SUPABASE_URL}/auth/v1" if SUPABASE_URL else ''
+SUPABASE_AUTH_ENABLED = bool(SUPABASE_URL and SUPABASE_KEY)
+# How long a server-side "this email is verified" grant survives (minutes).
+EMAIL_VERIFICATION_GRANT_MINUTES = 30
 translation_cache = {}
 TRANSLATION_PROVIDER = "google-gtx-public"
 TRANSLATION_URL = "https://translate.googleapis.com/translate_a/single"
@@ -365,6 +357,23 @@ def ensure_group_schema():
                         conn.execute(text(statement))
     except Exception as exc:
         print(f"[DB] Warning: could not verify groups schema extras: {exc}")
+
+
+def ensure_user_schema():
+    """Backfill the email_verified flag for databases created before it existed."""
+    try:
+        inspector = inspect(db.engine)
+        if 'users' not in inspector.get_table_names():
+            return
+
+        columns = {col['name'] for col in inspector.get_columns('users')}
+        if 'email_verified' not in columns:
+            with db.engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT FALSE"
+                ))
+    except Exception as exc:
+        print(f"[DB] Warning: could not verify users schema extras: {exc}")
 
 
 def save_group_cover_upload(file_storage) -> str | None:
@@ -564,15 +573,16 @@ def serialize_group_member_row(
 def serialize_group_message(message: GroupMessage) -> dict:
     location = parse_location_snapshot(message.location_snapshot)
     message_type = (message.message_type or 'text').lower()
+    sender_name = message.sender.username if message.sender else 'System / Panic'
     return {
         'id': message.id,
-        'sender': message.sender.username,
-        'sender_name': message.sender.username,
+        'sender': sender_name,
+        'sender_name': sender_name,
         'sender_id': message.sender_id,
         'message': message.message or '',
         'message_type': message_type,
-        'timestamp': message.timestamp.isoformat(),
-        'timestamp_label': message.timestamp.strftime('%H:%M'),
+        'timestamp': (message.timestamp or datetime.now()).isoformat(),
+        'timestamp_label': (message.timestamp or datetime.now()).strftime('%H:%M'),
         'attachment_name': message.attachment_name,
         'attachment_url': message.attachment_url,
         'attachment_mime': message.attachment_mime,
@@ -701,11 +711,15 @@ def create_group_sos_messages(user: User, tourist: Tourist, alert_label: str) ->
 
 def trigger_hardware_sos(tourist, source_label='HARDWARE Panic', map_url=None):
     """
-    Unified handler for physical SOS alerts from IoT devices.
+    Unified handler for physical and website SOS alerts.
     Increases reliability by ensuring all channels (SocketIO, Database, Group Chat) are signaled.
     """
     # 1. Real-time UI notification (Admin Dashboard flashy alert)
-    socketio.emit('hardware_sos_triggered', {'tourist_id': tourist.id}, namespace='/')
+    socketio.emit('hardware_sos_triggered', {
+        'tourist_id': tourist.id,
+        'tourist_name': tourist.name,
+        'source': source_label
+    }, namespace='/')
     
     # 2. Database records
     location_text = tourist.last_known_location
@@ -714,7 +728,7 @@ def trigger_hardware_sos(tourist, source_label='HARDWARE Panic', map_url=None):
         if "Map:" not in (location_text or ""):
             location_text = f"{location_text or 'Unknown'} | Visual: {map_url}"
         
-    db.session.add(Alert(tourist_id=tourist.id, location=location_text, alert_type='HARDWARE Panic'))
+    db.session.add(Alert(tourist_id=tourist.id, location=location_text, alert_type=f'Panic ({source_label})'))
     
     # Check for existing active anomaly to prevent redundant entries in very short time
     ten_sec_ago = datetime.now() - timedelta(seconds=10)
@@ -728,7 +742,7 @@ def trigger_hardware_sos(tourist, source_label='HARDWARE Panic', map_url=None):
         db.session.add(Anomaly(
             tourist_id=tourist.id, 
             anomaly_type='Hardware SOS', 
-            description=f'Physical SOS button press detected via {source_label}.', 
+            description=f'SOS button press detected via {source_label}.', 
             status='active'
         ))
     
@@ -740,7 +754,10 @@ def trigger_hardware_sos(tourist, source_label='HARDWARE Panic', map_url=None):
     if linked_user:
         sos_messages = create_group_sos_messages(linked_user, tourist, source_label)
         for msg in sos_messages:
-            emit_group_message(msg)
+            try:
+                emit_group_message(msg)
+            except Exception as err:
+                print(f"[SOS Helper] Group message emit warning: {err}")
     
     db.session.commit()
     print(f"[SOS Helper] 🚨 Unified SOS Triggered for {tourist.name} (UID: {tourist.user_id}) via {source_label}")
@@ -1633,6 +1650,9 @@ def api_register():
     Register a new user (TravelTogether account).
     Optionally also creates a Tourist profile if KYC data is supplied.
 
+    The email must already have been proven via /api/auth/email/verify-code
+    in this same session.
+
     Body (JSON):
         username, password, email
         [phone, gender, bio]                  — optional user fields
@@ -1648,6 +1668,13 @@ def api_register():
     if not validate_email(data['email']):
         return jsonify({'error': 'Invalid email address.'}), 400
 
+    email = data['email'].strip().lower()
+    if not email_verification_granted(email):
+        return jsonify({
+            'error': 'Please verify this email address before registering.',
+            'email_verification_required': True,
+        }), 403
+
     ok, msg = validate_password(data['password'])
     if not ok:
         return jsonify({'error': msg}), 400
@@ -1657,7 +1684,8 @@ def api_register():
         id       = generate_id(),
         username = data['username'].strip(),
         password = hash_password(data['password']),
-        email    = data['email'].strip().lower(),
+        email    = email,
+        email_verified = True,
         phone    = data.get('phone'),
         gender   = data.get('gender'),
         bio      = data.get('bio'),
@@ -1717,6 +1745,7 @@ def api_register():
 
     db.session.commit()
     session['user_id'] = user.id
+    clear_email_verification()   # one grant, one account
 
     return jsonify({
         'message': 'Registration successful.',
@@ -1728,11 +1757,12 @@ def api_register():
 @app.route('/api/auth/login', methods=['POST'])
 def api_login():
     """
-    Login with username+password  OR  phone+OTP (Astra-style).
+    Login with username+password  OR  a Supabase-verified email (Astra-style
+    passwordless tourist login).
 
     Body options:
         { "username": "...", "password": "..." }
-        { "phone": "+91...", "otp_verified": true }
+        { "email": "..." }   — requires /api/auth/email/verify-code first
     """
     data = request.get_json(force=True)
 
@@ -1761,36 +1791,57 @@ def api_login():
 
         return jsonify({'message': 'Login successful.', 'user_id': user.id}), 200
 
-    if data.get('phone'):
-        # Tourist phone-only login (OTP must have been verified separately)
-        if not data.get('otp_verified'):
-            return jsonify({'error': 'OTP verification required.'}), 403
-        tourist = Tourist.query.filter_by(phone=data['phone']).order_by(Tourist.id.desc()).first()
-        if not tourist:
-            return jsonify({'error': 'No tourist profile found for this number.'}), 404
-        if tourist.user_id:
-            session['user_id'] = tourist.user_id
-        session['tourist_id'] = tourist.id
+    if data.get('email'):
+        # Passwordless login — the email must have been proven in this session.
+        email = data['email'].strip().lower()
+        if not email_verification_granted(email):
+            return jsonify({
+                'error': 'Please verify this email address before logging in.',
+                'email_verification_required': True,
+            }), 403
 
-        # --- Blockchain Security for Phone Login ---
+        user = User.query.filter(func.lower(User.email) == email).first()
+        if not user:
+            return jsonify({'error': 'No account found for this email address.'}), 404
+
+        # Commit the flag on its own — the blockchain block below rolls back
+        # on failure and must not take the verified flag with it.
+        user.email_verified = True
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        session['user_id'] = user.id
+        clear_email_verification()   # one grant, one login
+
+        tourist = user.tourist_profile
+        if tourist:
+            session['tourist_id'] = tourist.id
+
+        # --- Blockchain Security for Email Login ---
         try:
             login_event = {
-                "phone": tourist.phone,
+                "email": user.email,
                 "ip": request.remote_addr,
-                "status": "TOURIST_SUCCESS",
-                "tourist_id": tourist.id
+                "status": "EMAIL_SUCCESS",
+                "tourist_id": tourist.id if tourist else None
             }
             # Mine block even for tourists to ensure audit integrity
-            block = BlockchainBlock.mine_block("TOURIST_LOGIN", tourist.user_id or 0, login_event)
+            block = BlockchainBlock.mine_block("EMAIL_LOGIN", user.id, login_event)
             db.session.add(block)
             db.session.commit()
         except Exception as eb:
             db.session.rollback()
-            print(f"[Blockchain] Tourist login block failed: {eb}")
+            print(f"[Blockchain] Email login block failed: {eb}")
 
-        return jsonify({'message': 'Tourist login successful.', 'tourist_id': tourist.id}), 200
+        return jsonify({
+            'message': 'Login successful.',
+            'user_id': user.id,
+            'tourist_id': tourist.id if tourist else None,
+        }), 200
 
-    return jsonify({'error': 'Provide username+password or phone.'}), 400
+    return jsonify({'error': 'Provide username+password or a verified email.'}), 400
 
 
 @app.route('/api/auth/logout')
@@ -1864,64 +1915,175 @@ def api_blockchain_verify():
 
 # ─────────────────────────────────────────────
 # ════════════════════════════════════════════
-#  OTP API  (/api/otp/...)
+#  EMAIL VERIFICATION API  (/api/auth/email/...)
+#  Backed by Supabase Auth email OTP (GoTrue).
 # ════════════════════════════════════════════
 # ─────────────────────────────────────────────
 
-@app.route('/api/otp/send', methods=['POST'])
-def api_send_otp():
+def supabase_auth_request(path: str, payload: dict):
+    """
+    POST to the Supabase Auth (GoTrue) REST API.
+    Returns (status_code, parsed_body). status_code 0 means the call never landed.
+    """
+    try:
+        resp = requests.post(
+            f"{SUPABASE_AUTH_URL}{path}",
+            json=payload,
+            headers={
+                'apikey': SUPABASE_KEY,
+                'Authorization': f'Bearer {SUPABASE_KEY}',
+                'Content-Type': 'application/json',
+            },
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        print(f"[EmailAuth] Supabase request to {path} failed: {exc}")
+        return 0, {'error': str(exc)}
+
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {}
+    return resp.status_code, body
+
+
+def supabase_error_message(body: dict, fallback: str) -> str:
+    """GoTrue spreads its message across a few keys depending on the failure."""
+    if not isinstance(body, dict):
+        return fallback
+    for key in ('msg', 'error_description', 'message', 'error'):
+        value = body.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return fallback
+
+
+def grant_email_verification(email: str) -> None:
+    """Record server-side that this browser session proved ownership of `email`."""
+    session['verified_email'] = email.strip().lower()
+    session['verified_email_at'] = datetime.utcnow().isoformat()
+
+
+def email_verification_granted(email: str) -> bool:
+    """
+    True only if THIS session verified THIS email recently. The client never
+    gets to assert its own verification — that was the hole in the old
+    `{"otp_verified": true}` flow.
+    """
+    granted = session.get('verified_email')
+    stamped = session.get('verified_email_at')
+    if not granted or not stamped:
+        return False
+    if granted != (email or '').strip().lower():
+        return False
+    try:
+        when = datetime.fromisoformat(stamped)
+    except ValueError:
+        return False
+    return datetime.utcnow() <= when + timedelta(minutes=EMAIL_VERIFICATION_GRANT_MINUTES)
+
+
+def clear_email_verification() -> None:
+    session.pop('verified_email', None)
+    session.pop('verified_email_at', None)
+
+
+@app.route('/api/auth/email/send-code', methods=['POST'])
+def api_send_email_code():
+    """
+    Email a 6-digit verification code via Supabase Auth.
+
+    Body: { "email": "...", "purpose": "register" | "login" }
+    The purpose decides whether the address is expected to already have an
+    account — registering onto a taken email and signing in to a missing one
+    are both dead ends, so catch them before spending an email.
+    """
+    data    = request.get_json(force=True)
+    email   = (data.get('email') or '').strip().lower()
+    purpose = (data.get('purpose') or 'register').strip().lower()
+
+    if not email:
+        return jsonify({'error': 'Email address is required.'}), 400
+    if not validate_email(email):
+        return jsonify({'error': 'Invalid email address.'}), 400
+    if purpose not in ('register', 'login'):
+        return jsonify({'error': 'Unknown verification purpose.'}), 400
+
+    existing = User.query.filter(func.lower(User.email) == email).first()
+    if purpose == 'register' and existing:
+        return jsonify({'error': 'An account already uses this email. Please log in instead.'}), 409
+    if purpose == 'login' and not existing:
+        return jsonify({'error': 'No account found for this email address.'}), 404
+
+    # Sending a fresh code invalidates any earlier grant for this session.
+    clear_email_verification()
+
+    if not SUPABASE_AUTH_ENABLED:
+        # Dev mode: no Supabase project configured, so print the code instead.
+        code = str(random.randint(100000, 999999))
+        session['dev_email_code'] = code
+        session['dev_email_target'] = email
+        print(f"[DEV] Email verification code for {email}: {code}")
+        return jsonify({
+            'message': 'Verification code generated (dev mode — check the server console).',
+            'dev_mode': True,
+        }), 200
+
+    status, body = supabase_auth_request('/otp', {'email': email, 'create_user': True})
+
+    if status == 200:
+        return jsonify({'message': 'Verification code sent. Check your inbox.'}), 200
+    if status == 429:
+        return jsonify({
+            'error': supabase_error_message(body, 'Too many requests. Wait a minute and try again.')
+        }), 429
+    if status == 0:
+        return jsonify({'error': 'Could not reach the email service. Please try again.'}), 503
+
+    return jsonify({
+        'error': supabase_error_message(body, 'Failed to send the verification email.')
+    }), 502
+
+
+@app.route('/api/auth/email/verify-code', methods=['POST'])
+def api_verify_email_code():
+    """Check the emailed code and grant this session a verified-email stamp."""
     data  = request.get_json(force=True)
-    phone = data.get('phone', '').strip()
+    email = (data.get('email') or '').strip().lower()
+    code  = (data.get('code') or '').strip()
 
-    if not phone:
-        return jsonify({'error': 'Phone number is required.'}), 400
-    if not phone.startswith('+'):
-        return jsonify({'error': 'Phone must be in E.164 format (e.g. +91xxxxxxxxxx).'}), 400
+    if not email or not code:
+        return jsonify({'error': 'Email and verification code are required.'}), 400
 
-    otp = str(random.randint(100000, 999999))
-    otp_storage[phone] = {'otp': otp, 'timestamp': datetime.utcnow()}
+    if not SUPABASE_AUTH_ENABLED:
+        expected = session.get('dev_email_code')
+        target   = session.get('dev_email_target')
+        if not expected or target != email:
+            return jsonify({'error': 'No code was requested for this address.'}), 404
+        if code != expected:
+            return jsonify({'error': 'Invalid verification code.'}), 400
+        session.pop('dev_email_code', None)
+        session.pop('dev_email_target', None)
+        grant_email_verification(email)
+        return jsonify({'message': 'Email verified.', 'verified': True}), 200
 
-    if twilio_client:
-        try:
-            twilio_client.messages.create(
-                body=f"Your verification code is: {otp}",
-                from_=TWILIO_PHONE_NUMBER,
-                to=phone,
-            )
-        except Exception as e:
-            print(f"Twilio error: {e}")
-            print(f"[DEV FALLBACK] OTP for {phone}: {otp}")
-            return jsonify({
-                'error': f'Twilio failed: {str(e)}', 
-                'dev_otp': otp,
-                'message': 'Failed to send SMS, but OTP generated for terminal.'
-            }), 200
-    else:
-        # Dev mode: print OTP to console instead of sending SMS
-        print(f"[DEV] OTP for {phone}: {otp}")
+    status, body = supabase_auth_request(
+        '/verify', {'type': 'email', 'email': email, 'token': code}
+    )
 
-    return jsonify({'message': 'OTP sent.'}), 200
+    if status == 200:
+        grant_email_verification(email)
+        return jsonify({'message': 'Email verified.', 'verified': True}), 200
+    if status in (400, 401, 403):
+        return jsonify({
+            'error': supabase_error_message(body, 'Invalid or expired verification code.')
+        }), 400
+    if status == 0:
+        return jsonify({'error': 'Could not reach the email service. Please try again.'}), 503
 
-
-@app.route('/api/otp/verify', methods=['POST'])
-def api_verify_otp():
-    data        = request.get_json(force=True)
-    phone       = data.get('phone', '').strip()
-    otp_attempt = data.get('otp', '').strip()
-
-    if phone not in otp_storage:
-        return jsonify({'error': 'OTP not requested or already used.'}), 404
-
-    info = otp_storage[phone]
-    if datetime.utcnow() > info['timestamp'] + timedelta(minutes=5):
-        del otp_storage[phone]
-        return jsonify({'error': 'OTP expired.'}), 410
-
-    if info['otp'] != otp_attempt:
-        return jsonify({'error': 'Invalid OTP.'}), 400
-
-    del otp_storage[phone]
-    return jsonify({'message': 'OTP verified.', 'verified': True}), 200
+    return jsonify({
+        'error': supabase_error_message(body, 'Verification failed.')
+    }), 502
 
 
 @app.route('/api/iot/config', methods=['POST'])
@@ -2419,20 +2581,7 @@ def safety_panic():
     if not tourist:
         return jsonify({'error': 'Tourist not found.'}), 404
 
-    user = get_current_user()
-    if not user and tourist.user_id:
-        user = db.session.get(User, tourist.user_id)
-
-    db.session.add(Alert(
-        tourist_id = tourist.id,
-        location   = tourist.last_known_location,
-        alert_type = 'Panic Button',
-    ))
-    sos_messages = create_group_sos_messages(user, tourist, 'Panic Button') if user else []
-    tourist.safety_score = 0
-    db.session.commit()
-    for message in sos_messages:
-        emit_group_message(message)
+    trigger_hardware_sos(tourist, source_label='Website Panic Button')
     return jsonify({'message': 'Panic alert registered.'}), 200
 
 
@@ -2453,6 +2602,11 @@ def safety_my_profile():
     tourist = get_current_tourist()
     if not tourist:
         return jsonify({'error': 'No tourist profile found.'}), 404
+    tourist.last_updated_at = datetime.now()
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
     return jsonify({
         'id':                   tourist.id,
         'name':                 tourist.name,
@@ -2460,7 +2614,8 @@ def safety_my_profile():
         'safety_score':         tourist.safety_score,
         'last_known_location':  tourist.last_known_location,
         'visit_end_date':       tourist.visit_end_date.isoformat(),
-        'last_updated_at':      tourist.last_updated_at.isoformat(),
+        'last_updated_at':      tourist.last_updated_at.isoformat() if tourist.last_updated_at else None,
+        'iot_mode_enabled':     bool(tourist.iot_mode_enabled),
     })
 
 
@@ -2688,15 +2843,31 @@ def thingspeak_loop():
 
 @app.route('/api/admin/tourists')
 def admin_tourists():
-    tourists = Tourist.query.all()
-    return jsonify([{
-        'id':                  t.id,
-        'name':                t.name,
-        'phone':               t.phone,
-        'safety_score':        t.safety_score,
-        'last_known_location': t.last_known_location,
-        'visit_end_date':      t.visit_end_date.isoformat(),
-    } for t in tourists])
+    tourists = Tourist.query.order_by(Tourist.id.desc()).all()
+    now = datetime.now()
+    result = []
+    for t in tourists:
+        last_up = t.last_updated_at or t.registration_date
+        # Active in last 15 minutes or having active session = Online
+        is_online = bool(last_up and (now - last_up).total_seconds() < 900)
+        device_mode = 'Fixed IoT Device' if t.iot_mode_enabled else 'Mobile Web App'
+        device_status = 'ON' if is_online else 'OFF'
+
+        result.append({
+            'id':                  t.id,
+            'name':                t.name,
+            'phone':               t.phone,
+            'safety_score':        t.safety_score,
+            'last_known_location': t.last_known_location,
+            'visit_end_date':      t.visit_end_date.isoformat(),
+            'iot_mode_enabled':    bool(t.iot_mode_enabled),
+            'blynk_token':         bool(t.blynk_token),
+            'is_online':           is_online,
+            'device_mode':         device_mode,
+            'device_status':       device_status,
+            'last_updated_at':     last_up.isoformat() if last_up else None,
+        })
+    return jsonify(result)
 
 
 @app.route('/api/admin/alerts')
@@ -2857,6 +3028,7 @@ def init_db():
         try:
             db.create_all()
             ensure_group_schema()
+            ensure_user_schema()
             os.makedirs(GROUP_UPLOAD_DIR, exist_ok=True)
             os.makedirs(GROUP_MESSAGE_UPLOAD_DIR, exist_ok=True)
             seed_safety_zones()
@@ -2864,6 +3036,7 @@ def init_db():
         except Exception as e:
             print(f"[DB] Warning: db.create_all() encountered an issue (tables may already exist): {e}")
             ensure_group_schema()
+            ensure_user_schema()
             os.makedirs(GROUP_UPLOAD_DIR, exist_ok=True)
             os.makedirs(GROUP_MESSAGE_UPLOAD_DIR, exist_ok=True)
             print("Database ready (skipped schema creation).")
