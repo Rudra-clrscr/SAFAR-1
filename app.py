@@ -2097,13 +2097,22 @@ def api_verify_email_code():
         grant_email_verification(email)
         return jsonify({'message': 'Email verified.', 'verified': True}), 200
 
-    status, body = supabase_auth_request(
-        '/verify', {'type': 'email', 'email': email, 'token': code}
-    )
+    # Which template GoTrue sent decides the token's type, and we cannot know
+    # it from here: a first-time address gets "Confirm signup" (type 'signup'),
+    # while an address whose Supabase user already exists gets "Magic Link"
+    # (type 'magiclink'). Since one address may now back several accounts, both
+    # happen in normal use — so try each until one is accepted.
+    status, body = 0, {}
+    for token_type in ('email', 'signup', 'magiclink'):
+        status, body = supabase_auth_request(
+            '/verify', {'type': token_type, 'email': email, 'token': code}
+        )
+        if status == 200:
+            grant_email_verification(email)
+            return jsonify({'message': 'Email verified.', 'verified': True}), 200
+        if status not in (400, 401, 403):
+            break   # not a "wrong type/token" answer — stop guessing
 
-    if status == 200:
-        grant_email_verification(email)
-        return jsonify({'message': 'Email verified.', 'verified': True}), 200
     if status in (400, 401, 403):
         return jsonify({
             'error': supabase_error_message(body, 'Invalid or expired verification code.')
