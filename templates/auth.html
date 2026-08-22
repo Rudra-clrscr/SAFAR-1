@@ -238,7 +238,7 @@
         });
         const d = await r.json();
         if (!r.ok) { showAlert('Could not send code', d.error); return false; }
-        if (d.dev_mode) showAlert('Dev mode', 'Supabase is not configured, so the code was printed to the server console.');
+        if (d.dev_mode) showAlert('Check the server log', 'The verification code was written to the server log instead of being emailed.');
         return true;
       } finally {
         button.disabled = false;

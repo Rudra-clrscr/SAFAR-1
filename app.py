@@ -190,6 +190,9 @@ SUPABASE_URL      = (os.environ.get('SUPABASE_URL') or '').rstrip('/')
 SUPABASE_KEY      = os.environ.get('SUPABASE_KEY') or ''
 SUPABASE_AUTH_URL = f"{SUPABASE_URL}/auth/v1" if SUPABASE_URL else ''
 SUPABASE_AUTH_ENABLED = bool(SUPABASE_URL and SUPABASE_KEY)
+# Escape hatch for demos: print verification codes to the log instead of
+# emailing them, sidestepping the built-in sender's 2-per-hour ceiling.
+EMAIL_CODES_TO_CONSOLE = (os.environ.get('EMAIL_CODES_TO_CONSOLE') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
 # How long a server-side "this email is verified" grant survives (minutes).
 EMAIL_VERIFICATION_GRANT_MINUTES = 30
 translation_cache = {}
@@ -2011,6 +2014,15 @@ def clear_email_verification() -> None:
     session.pop('verified_email_at', None)
 
 
+def use_console_email_codes() -> bool:
+    """
+    Log the code instead of emailing it. Forced by EMAIL_CODES_TO_CONSOLE, and
+    used automatically when no Supabase project is configured so local runs
+    work offline. Send and verify must agree, hence the single helper.
+    """
+    return EMAIL_CODES_TO_CONSOLE or not SUPABASE_AUTH_ENABLED
+
+
 @app.route('/api/auth/email/send-code', methods=['POST'])
 def api_send_email_code():
     """
@@ -2041,14 +2053,15 @@ def api_send_email_code():
     # Sending a fresh code invalidates any earlier grant for this session.
     clear_email_verification()
 
-    if not SUPABASE_AUTH_ENABLED:
-        # Dev mode: no Supabase project configured, so print the code instead.
+    if use_console_email_codes():
         code = str(random.randint(100000, 999999))
         session['dev_email_code'] = code
         session['dev_email_target'] = email
-        print(f"[DEV] Email verification code for {email}: {code}")
+        # flush: gunicorn buffers stdout, and an unflushed code never reaches
+        # the log the operator is reading it from.
+        print(f"[SAFAR] Email verification code for {email}: {code}", flush=True)
         return jsonify({
-            'message': 'Verification code generated (dev mode — check the server console).',
+            'message': 'Verification code written to the server log.',
             'dev_mode': True,
         }), 200
 
@@ -2085,7 +2098,7 @@ def api_verify_email_code():
     if not email or not code:
         return jsonify({'error': 'Email and verification code are required.'}), 400
 
-    if not SUPABASE_AUTH_ENABLED:
+    if use_console_email_codes():
         expected = session.get('dev_email_code')
         target   = session.get('dev_email_target')
         if not expected or target != email:

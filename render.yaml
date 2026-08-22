@@ -15,6 +15,11 @@ services:
         sync: false
       - key: SUPABASE_KEY
         sync: false
+      # Set to 1 to write email verification codes to the log instead of
+      # emailing them, bypassing the built-in sender's 2-per-hour ceiling.
+      # Anyone who can read the logs can then log in — leave unset normally.
+      - key: EMAIL_CODES_TO_CONSOLE
+        sync: false
       # ThingSpeak IoT tracker. The channel is private, so the poller needs
       # the channel's Read API Key — set it in the Render dashboard.
       - key: THINGSPEAK_CHANNEL_ID
