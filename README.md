@@ -230,7 +230,7 @@ The `Dockerfile` uses a multi-stage build to keep the final image lean (Python 3
 - SQLite fallback is available for local development only (`ALLOW_SQLITE_FALLBACK=1`). **Do not enable in production.**
 - If `SUPABASE_URL` / `SUPABASE_KEY` are not configured, verification codes are printed to the server console — useful for development.
 - Supabase sends the code using the **Magic Link** email template, which must contain `{{ .Token }}` for a numeric code to appear. Codes expire after 1 hour and can be re-requested once every 60 seconds.
-- Supabase's built-in email sender is rate limited; configure custom SMTP in the Supabase dashboard before real traffic.
+- Supabase's built-in email sender has two hard limits: **2 messages per hour**, and it will only deliver to addresses belonging to the Supabase project's team (anyone else is rejected with *Email address not authorized*). To let arbitrary users register, configure custom SMTP in the Supabase dashboard — note that Resend and similar providers require a domain you control DNS for, so a `*.onrender.com` address will not work.
 - The IoT polling loop is only active when `BLYNK_AUTH_TOKEN` is set (either in `.env` or per-user in the database).
 
 ---

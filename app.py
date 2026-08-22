@@ -2039,6 +2039,13 @@ def api_send_email_code():
         }), 429
     if status == 0:
         return jsonify({'error': 'Could not reach the email service. Please try again.'}), 503
+    if status in (400, 401, 403, 422):
+        # Supabase rejected the address itself — most often "Email address not
+        # authorized", which is what the built-in sender returns for anyone who
+        # is not a member of the project team. Show its wording verbatim.
+        return jsonify({
+            'error': supabase_error_message(body, 'This email address was rejected by the email service.')
+        }), 400
 
     return jsonify({
         'error': supabase_error_message(body, 'Failed to send the verification email.')
