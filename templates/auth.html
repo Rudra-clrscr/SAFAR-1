@@ -126,6 +126,11 @@
               <div class="form-group"><label>Verification Code</label><input type="text" id="l-code" placeholder="6-digit code" maxlength="6" inputmode="numeric" required></div>
               <button type="submit" class="btn btn-tt" style="width:100%;padding:12px;border-radius:var(--radius)"><i class="fas fa-check" style="margin-right:6px"></i> Verify & Login</button>
             </form>
+            <form class="auth-form hidden" onsubmit="submitAccountChoice(event)" id="l-email-step3">
+              <div class="flash-msg" style="margin-bottom:16px">Several accounts use this email. Choose which one to sign in to.</div>
+              <div class="form-group"><label>Account</label><select id="l-account" data-no-translate></select></div>
+              <button type="submit" class="btn btn-tt" style="width:100%;padding:12px;border-radius:var(--radius)"><i class="fas fa-arrow-right" style="margin-right:6px"></i> Continue</button>
+            </form>
             <p style="text-align:center;margin-top:14px;font-size:0.84rem;color:var(--text2)">or <span
                 class="tt-text" style="cursor:pointer;font-weight:600" onclick="showLoginMode('password')">use your password</span></p>
           </div>
@@ -250,6 +255,32 @@
       document.getElementById('l-email-step2').classList.remove('hidden');
     }
 
+    // One email can back several accounts, so login may come back asking which.
+    async function finishEmailLogin(email, username) {
+      const body = username ? { email, username } : { email };
+      const r = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const d = await r.json();
+
+      if (r.status === 409 && d.account_choice_required) {
+        const sel = document.getElementById('l-account');
+        sel.innerHTML = '';
+        d.accounts.forEach(name => {
+          const opt = document.createElement('option');
+          opt.value = name; opt.textContent = name;
+          sel.appendChild(opt);
+        });
+        document.getElementById('l-email-step2').classList.add('hidden');
+        document.getElementById('l-email-step3').classList.remove('hidden');
+        return;
+      }
+
+      r.ok ? showAlert('Welcome back!', d.message, () => window.location.href = '/profile') : showAlert('Login Failed', d.error);
+    }
+
     async function verifyLoginCode(e) {
       e.preventDefault();
       const email = document.getElementById('l-email').value.trim();
@@ -261,13 +292,15 @@
       });
       if (!v.ok) { const d = await v.json(); showAlert('Verification Failed', d.error); return; }
 
-      const r = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-      const d = await r.json();
-      r.ok ? showAlert('Welcome back!', d.message, () => window.location.href = '/profile') : showAlert('Login Failed', d.error);
+      await finishEmailLogin(email, null);
+    }
+
+    async function submitAccountChoice(e) {
+      e.preventDefault();
+      await finishEmailLogin(
+        document.getElementById('l-email').value.trim(),
+        document.getElementById('l-account').value
+      );
     }
 
     async function sendRegistrationCode(e) {

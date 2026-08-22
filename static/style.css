@@ -2907,10 +2907,10 @@ footer p {
 
 .footer-v2-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
-  gap: 40px;
+  grid-template-columns: 1.6fr 0.9fr 0.9fr 0.9fr 1.4fr;
+  gap: 28px;
   padding: 56px 5%;
-  max-width: 1320px;
+  max-width: 1360px;
   margin: 0 auto;
 }
 
@@ -2935,6 +2935,42 @@ footer p {
   letter-spacing: 1px;
   color: var(--text);
   margin-bottom: 16px;
+}
+
+.footer-help-col h4 {
+  color: #f87171 !important;
+}
+
+.helpline-badge {
+  display: flex !important;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  padding: 6px 12px !important;
+  margin-bottom: 8px;
+  text-decoration: none;
+  transition: all 0.25s ease;
+}
+
+.helpline-badge span {
+  font-size: 0.78rem;
+  color: var(--text2, #94a3b8);
+  font-weight: 500;
+}
+
+.helpline-badge strong {
+  font-size: 0.88rem;
+  color: #f87171;
+  font-weight: 700;
+  font-family: monospace;
+}
+
+.helpline-badge:hover {
+  background: rgba(239, 68, 68, 0.22) !important;
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  transform: translateX(4px);
 }
 
 .footer-v2-col a {

@@ -58,6 +58,7 @@ const TRANSLATIONS = {
     // Footer
     'footer.tagline': "India's first AI-powered group travel platform with real-time tourist safety. Plan smart, travel safe.",
     'footer.quicklinks': 'Quick Links', 'footer.safety': 'Safety', 'footer.resources': 'Resources',
+    'footer.helplines.title': '🚨 Emergency Helplines', 'footer.helplines.national': 'National Emergency', 'footer.helplines.police': 'Police Helpline', 'footer.helplines.medical': 'Medical / Ambulance', 'footer.helplines.women': 'Women Safety', 'footer.helplines.tourist': 'Tourist Helpline',
     'footer.copy': '© SAFAR — Built with ❤️ by Team Safar',
     // Chatbot
     'chatbot.greeting': '✈️ Hi! I\'m your SAFAR AI assistant. How can I help you plan your next trip?',
@@ -118,6 +119,7 @@ const TRANSLATIONS = {
     // Footer
     'footer.tagline': 'भारत का पहला AI-संचालित समूह यात्रा मंच। स्मार्ट योजना, सुरक्षित यात्रा।',
     'footer.quicklinks': 'त्वरित लिंक', 'footer.safety': 'सुरक्षा', 'footer.resources': 'संसाधन',
+    'footer.helplines.title': '🚨 आपातकालीन हेल्पलाइन', 'footer.helplines.national': 'राष्ट्रीय आपातकाल', 'footer.helplines.police': 'पुलिस हेल्पलाइन', 'footer.helplines.medical': 'चिकित्सा / एम्बुलेंस', 'footer.helplines.women': 'महिला सुरक्षा', 'footer.helplines.tourist': 'पर्यटक हेल्पलाइन',
     'footer.copy': '© SAFAR — टीम SAFAR द्वारा ❤️ से निर्मित',
     'chatbot.greeting': '✈️ नमस्ते! मैं आपका SAFAR AI सहायक हूं। आपकी यात्रा योजना में कैसे मदद करूं?',
     'chatbot.placeholder': 'यात्रा के बारे में कुछ भी पूछें...',
@@ -161,6 +163,7 @@ const TRANSLATIONS = {
     // Footer
     'footer.tagline': 'भारतस्य प्रथमं AI-चालितं समूहयात्रा-मञ्चम्।',
     'footer.quicklinks': 'त्वरित-लिंकाः', 'footer.safety': 'सुरक्षा', 'footer.resources': 'संसाधनानि',
+    'footer.helplines.title': '🚨 आपत्कालीन-हेल्पलाइन', 'footer.helplines.national': 'राष्ट्रीय-आपत्कालः', 'footer.helplines.police': 'आरक्षक-हेल्पलाइन', 'footer.helplines.medical': 'चिकित्सा / रुग्णवाहनम्', 'footer.helplines.women': 'महिला-सुरक्षा', 'footer.helplines.tourist': 'पर्यटक-हेल्पलाइन',
     'footer.copy': '© SAFAR — दलेन SAFAR निर्मितम्',
     'chatbot.greeting': '✈️ नमस्ते! अहं भवतां SAFAR-AI-सहायकः अस्मि। यात्राविषये किं जानितुमिच्छन्ति?',
     'chatbot.placeholder': 'यात्राविषये किमपि पृच्छन्तु...',

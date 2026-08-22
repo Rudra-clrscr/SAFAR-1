@@ -1745,7 +1745,9 @@ def api_register():
 
     db.session.commit()
     session['user_id'] = user.id
-    clear_email_verification()   # one grant, one account
+    # The grant deliberately survives: one address may back several accounts,
+    # and re-verifying for each would burn through the sender's hourly quota.
+    # It still expires with EMAIL_VERIFICATION_GRANT_MINUTES.
 
     return jsonify({
         'message': 'Registration successful.',
@@ -1800,9 +1802,30 @@ def api_login():
                 'email_verification_required': True,
             }), 403
 
-        user = User.query.filter(func.lower(User.email) == email).first()
-        if not user:
+        candidates = (
+            User.query.filter(func.lower(User.email) == email)
+            .order_by(User.created_at.asc())
+            .all()
+        )
+        if not candidates:
             return jsonify({'error': 'No account found for this email address.'}), 404
+
+        # Several accounts may share one address, so the caller has to say
+        # which. Picking `.first()` would silently sign them into whichever
+        # row the database happened to return.
+        wanted = (data.get('username') or '').strip()
+        if wanted:
+            user = next((u for u in candidates if u.username == wanted), None)
+            if not user:
+                return jsonify({'error': 'That username is not registered to this email.'}), 404
+        elif len(candidates) == 1:
+            user = candidates[0]
+        else:
+            return jsonify({
+                'error': 'Several accounts use this email. Choose which one to sign in to.',
+                'account_choice_required': True,
+                'accounts': [u.username for u in candidates],
+            }), 409
 
         # Commit the flag on its own — the blockchain block below rolls back
         # on failure and must not take the verified flag with it.
@@ -1994,9 +2017,10 @@ def api_send_email_code():
     Email a 6-digit verification code via Supabase Auth.
 
     Body: { "email": "...", "purpose": "register" | "login" }
-    The purpose decides whether the address is expected to already have an
-    account — registering onto a taken email and signing in to a missing one
-    are both dead ends, so catch them before spending an email.
+    One address may back several accounts (they are told apart by username),
+    so only the login direction needs the address to already exist — signing
+    in to an address nobody registered is a dead end worth catching before
+    spending an email.
     """
     data    = request.get_json(force=True)
     email   = (data.get('email') or '').strip().lower()
@@ -2009,11 +2033,10 @@ def api_send_email_code():
     if purpose not in ('register', 'login'):
         return jsonify({'error': 'Unknown verification purpose.'}), 400
 
-    existing = User.query.filter(func.lower(User.email) == email).first()
-    if purpose == 'register' and existing:
-        return jsonify({'error': 'An account already uses this email. Please log in instead.'}), 409
-    if purpose == 'login' and not existing:
-        return jsonify({'error': 'No account found for this email address.'}), 404
+    if purpose == 'login':
+        existing = User.query.filter(func.lower(User.email) == email).first()
+        if not existing:
+            return jsonify({'error': 'No account found for this email address.'}), 404
 
     # Sending a fresh code invalidates any earlier grant for this session.
     clear_email_verification()
