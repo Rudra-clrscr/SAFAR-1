@@ -8,8 +8,11 @@
   <meta name="description"
     content="Mayurya is SAFAR's multilingual travel intelligence system for destinations, safety guidance, itineraries, and group travel support.">
   <link rel="stylesheet" href="/static/travel.css">
+  <link rel="stylesheet" href="/static/navigation.css">
   <link rel="stylesheet" href="/static/tour.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 
 <body class="travel-page" data-lang="en" data-page="travel">
@@ -215,6 +218,115 @@
     </div>
   </section>
 
+  <section class="mayurya-section reveal" id="travel-route-section">
+    <div class="section-header">
+      <span class="section-tag section-tag-tt">Route Planner</span>
+      <h2>Turn a destination into a route.</h2>
+      <p>Ask Mayurya for advice, then open a step-by-step route without leaving the page.</p>
+    </div>
+    <div class="card nav-planner" data-nav-widget data-nav-auto="false">
+      <div class="nav-planner-header">
+        <div>
+          <span class="section-tag section-tag-tt">Navigation</span>
+          <h3>Preview how to get there.</h3>
+        </div>
+        <span class="nav-planner-state ready" data-nav-state>Ready</span>
+      </div>
+      <div class="nav-planner-row">
+        <input type="text" data-nav-input placeholder="Enter a city, landmark, or safety zone">
+        <button class="btn btn-tt" type="button" data-nav-go>
+          <i class="fas fa-route"></i>
+          Get Route
+        </button>
+      </div>
+      <div class="nav-planner-chips">
+        <button type="button" class="nav-chip" data-nav-target="Manali">Manali</button>
+        <button type="button" class="nav-chip" data-nav-target="Goa">Goa</button>
+        <button type="button" class="nav-chip" data-nav-target="Jaipur">Jaipur</button>
+        <button type="button" class="nav-chip" data-nav-target="Kerala">Kerala</button>
+        <button type="button" class="nav-chip" data-nav-target="Varanasi">Varanasi</button>
+        <button type="button" class="nav-chip" data-nav-target="Agra">Agra</button>
+      </div>
+      <div class="nav-planner-livebar">
+        <div class="nav-planner-next">
+          <span>Next turn</span>
+          <strong data-nav-next>Pick a destination to begin</strong>
+          <small data-nav-distance>Live map will follow your position</small>
+        </div>
+        <button type="button" class="btn btn-ghost nav-follow-btn" data-nav-follow>Follow Me</button>
+      </div>
+      <div class="nav-planner-modebar" data-nav-modebar>
+        <button type="button" class="nav-mode-btn active" data-nav-mode="driving">Drive</button>
+        <button type="button" class="nav-mode-btn" data-nav-mode="walking">Walk</button>
+      </div>
+      <div class="nav-planner-map-shell">
+        <div class="nav-planner-map-overlay">
+          <span class="nav-planner-overlay-kicker">Live navigation</span>
+          <strong data-nav-current>Waiting for a route</strong>
+          <small data-nav-current-sub>Allow location access to follow your trip like Google Maps.</small>
+          <button type="button" class="btn btn-ghost nav-center-btn" data-nav-center>Recenter</button>
+        </div>
+        <div class="nav-planner-map" data-nav-map aria-label="Route map"></div>
+        <button type="button" class="nav-view-toggle" data-nav-3d aria-pressed="false" title="Switch between the flat map and the tilted 3D view">
+          <i class="fas fa-cube"></i> 3D
+        </button>
+        <div class="nav-planner-bottomsheet">
+          <div class="nav-planner-bottomsheet-top">
+            <div>
+              <span class="nav-planner-bottomsheet-kicker" data-nav-sheet-state>Ready</span>
+              <strong data-nav-sheet-title>Turn-by-turn guide</strong>
+              <small data-nav-sheet-subtitle>Use Drive or Walk mode to preview your route.</small>
+            </div>
+          </div>
+          <div class="nav-planner-bottomsheet-meta">
+            <span data-nav-sheet-meta>Route progress will appear here</span>
+          </div>
+          <div class="nav-planner-progress" aria-label="Route progress">
+            <div class="nav-planner-progress-track">
+              <div class="nav-planner-progress-fill" data-nav-sheet-progress></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="nav-planner-summary" data-nav-summary>
+        Enter a destination to begin navigation.
+      </div>
+      <div class="nav-guide-panel is-collapsed" data-nav-guide-panel hidden>
+        <div class="nav-guide-panel-header">
+          <div>
+            <span class="nav-guide-panel-kicker">Travel guide</span>
+            <strong>Full route overview</strong>
+          </div>
+        </div>
+        <div class="nav-guide-controls">
+          <button type="button" class="btn btn-ghost btn-sm nav-guide-step-btn" data-nav-guide-prev>
+            <i class="fas fa-chevron-left"></i>
+            <span>Previous</span>
+          </button>
+          <span class="nav-guide-counter" data-nav-guide-counter>No route yet</span>
+          <button type="button" class="btn btn-ghost btn-sm nav-guide-step-btn" data-nav-guide-next>
+            <span>Next</span>
+            <i class="fas fa-chevron-right"></i>
+          </button>
+          <button type="button" class="btn btn-tt btn-sm nav-guide-play" data-nav-guide-play>
+            <i class="fas fa-play"></i> Play Guide
+          </button>
+        </div>
+        <ol class="nav-planner-steps" data-nav-steps>
+          <li>Turn-by-turn guidance will appear here once a route is found.</li>
+        </ol>
+      </div>
+      <div class="nav-planner-actions">
+        <button class="btn btn-ast nav-guide-toggle" type="button" data-nav-guide-toggle disabled>
+          <i class="fas fa-map-signs"></i>
+          Travel Guide
+        </button>
+        <button class="btn btn-ghost" type="button" data-nav-clear>Clear Route</button>
+        <a class="btn btn-tt is-disabled" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true" data-nav-open>Open in Google Maps</a>
+      </div>
+    </div>
+  </section>
+
   <footer class="footer-v2">
     <div class="footer-v2-grid">
       <div class="footer-v2-brand">
@@ -323,6 +435,7 @@
   <script src="/static/dictionary-agent.js"></script>
   <script src="/static/translator-core.js"></script>
   <script src="/static/translators/travel.translator.js"></script>
+  <script src="/static/navigation.js"></script>
   <script src="/static/tour.js"></script>
 </body>
 

@@ -4770,8 +4770,10 @@ footer p {
 }
 
 /* ── Navbar Gita bar offset ──────────────── */
+:root { --gita-bar-h: 39px; }
+.home-page { --gita-bar-h: 46px; }
 .navbar-with-bar {
-  top: 37px;
+  top: calc(var(--gita-bar-h) + 2px);
 }
 
 body {

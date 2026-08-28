@@ -2463,7 +2463,7 @@ footer p {
 
 .hero-v2-stats {
   display: flex;
-  gap: 28px;
+  gap: 20px 40px;
   flex-wrap: wrap;
   margin-bottom: 28px;
 }
@@ -2471,11 +2471,20 @@ footer p {
 .hero-stat {
   display: flex;
   flex-direction: column;
+  min-width: max-content;
   font-family: 'Syne', sans-serif;
   font-weight: 800;
   font-size: 1.6rem;
   color: var(--tt);
   text-shadow: 0 0 20px var(--tt-glow);
+}
+
+/* A bare "+" text node next to the counter became its own column flex item,
+   so the suffix dropped onto the line below the number. */
+.hero-stat-value {
+  display: block;
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
 .hero-stat-label {
@@ -3064,7 +3073,7 @@ footer p {
 
 .footer-v2-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
+  grid-template-columns: 1.6fr repeat(4, 1fr);
   gap: 40px;
   padding: 56px 5%;
   max-width: 1320px;
@@ -4738,7 +4747,11 @@ footer p {
 }
 
 /* ── Navbar Gita bar offset ──────────────── */
-.navbar-with-bar { top: 37px; }
+/* The shloka bar is ~39px tall (46px on the home page) and paints above the
+   navbar, so a hardcoded 37px parked the pill underneath it. */
+:root { --gita-bar-h: 39px; }
+.home-page { --gita-bar-h: 46px; }
+.navbar-with-bar { top: calc(var(--gita-bar-h) + 2px); }
 body { padding-top: 0; }
 
 /* ── Discord App Sidebar ─────────────────── */
@@ -4985,7 +4998,7 @@ body { padding-top: 0; }
 
 .home-page .navbar {
   position: sticky;
-  top: 12px;
+  top: calc(var(--gita-bar-h) + 12px);
   left: auto;
   right: auto;
   width: min(1280px, calc(100% - 36px));
@@ -5202,3 +5215,81 @@ body { padding-top: 0; }
 .reveal-delay-1 { transition-delay: 0.1s; }
 .reveal-delay-2 { transition-delay: 0.2s; }
 .reveal-delay-3 { transition-delay: 0.3s; }
+
+/* ==========================================================================
+   Shared page width
+   The homepage was running three different gutters at once: the navbar at
+   1280px, the content grids at 1320px, and the section headers uncapped at
+   the section's own 5% padding (1728px at 1920). One token now drives them
+   all, widened so large screens waste less space at the sides.
+   ========================================================================== */
+:root {
+  --page-max: 1600px;
+  --page-gutter: 24px;
+}
+
+/* Sections gutter at 5%, so the navbar tracks the same 90% to stay aligned
+   with the content at every width, not just above 1600px. */
+.home-page .navbar {
+  width: min(var(--page-max), 90%);
+}
+
+.hero-v2-content,
+.section-header,
+.dest-grid,
+.experiences-grid,
+.offers-row,
+.features-grid,
+.footer-v2-grid,
+.nav-planner {
+  max-width: var(--page-max);
+  margin-inline: auto;
+}
+
+.hero-v2-content {
+  width: min(var(--page-max), 90%);
+}
+
+.animals-grid {
+  max-width: var(--page-max);
+  margin-inline: auto;
+}
+
+/* The footer's own 5% padding fought the shared cap, leaving it 86px narrower
+   than every block above it. Gutter moves to the footer, cap stays on the grid. */
+.footer-v2 {
+  padding-inline: 5%;
+}
+
+.footer-v2-grid {
+  padding-inline: 0;
+}
+
+/* A generic `footer { display:flex; justify-content:space-between }` from the
+   previous footer design was still applying here, so the link grid shrink-wrapped
+   instead of filling the container and the copyright bar sat beside it rather
+   than under it. The v2 footer is a stacked block. */
+.footer-v2 {
+  display: block;
+}
+
+.footer-v2-bottom {
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding-inline: 0;
+}
+
+/* The hero scenes are transform: scale()'d for the slow zoom, which pushed them
+   ~38px past each edge and gave the whole page a sideways scroll. */
+.hero-v2-bg {
+  overflow: hidden;
+}
+
+/* width:100% plus the template's inline `margin:0 5%` made every divider 110%
+   of the page, which is where the sideways scroll came from. The margin now
+   lives here so the dividers line up with the shared container too. */
+.rangoli-divider {
+  width: auto;
+  max-width: var(--page-max);
+  margin-inline: auto;
+}

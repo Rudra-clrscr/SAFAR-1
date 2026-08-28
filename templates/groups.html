@@ -435,6 +435,12 @@
                       <i class="fas fa-comments"></i>
                       <span data-i18n="groups.card.chat">Chat</span>
                     </a>
+                    {% if g.destination_name %}
+                    <a href="/profile?nav={{ g.destination_name|urlencode }}" class="btn btn-ghost">
+                      <i class="fas fa-route"></i>
+                      <span data-i18n="groups.card.navigate">Navigate</span>
+                    </a>
+                    {% endif %}
                     {% if user.id == g.owner_id %}
                     <a href="/groups/delete/{{ g.group_id }}" class="btn btn-danger" onclick="return confirm('Permanently delete this group?')">
                       <i class="fas fa-trash"></i>
@@ -451,6 +457,12 @@
                     <i class="fas fa-user-plus"></i>
                     <span data-i18n="groups.card.join">Join</span>
                   </a>
+                  {% if g.destination_name %}
+                  <a href="/profile?nav={{ g.destination_name|urlencode }}" class="btn btn-ghost">
+                    <i class="fas fa-route"></i>
+                    <span data-i18n="groups.card.navigate">Navigate</span>
+                  </a>
+                  {% endif %}
                   {% endif %}
                 </div>
               </div>

@@ -4551,7 +4551,11 @@ footer p {
 }
 
 /* ── Navbar Gita bar offset ──────────────── */
-.navbar-with-bar { top: 37px; }
+/* The shloka bar is ~39px tall (46px on the home page) and paints above the
+   navbar, so a hardcoded 37px parked the pill underneath it. */
+:root { --gita-bar-h: 39px; }
+.home-page { --gita-bar-h: 46px; }
+.navbar-with-bar { top: calc(var(--gita-bar-h) + 2px); }
 body { padding-top: 0; }
 
 /* ── Discord App Sidebar ─────────────────── */
@@ -4861,3 +4865,8 @@ body { padding-top: 0; }
 .reveal-delay-1 { transition-delay: 0.1s; }
 .reveal-delay-2 { transition-delay: 0.2s; }
 .reveal-delay-3 { transition-delay: 0.3s; }
+/* Keyless OSM tiles rendered dark; scoped to the tile pane so the tourist
+   markers and layer groups keep their own colours. */
+#adminMap .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.5);
+}

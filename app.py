@@ -193,6 +193,10 @@ SUPABASE_AUTH_ENABLED = bool(SUPABASE_URL and SUPABASE_KEY)
 # Escape hatch for demos: print verification codes to the log instead of
 # emailing them, sidestepping the built-in sender's 2-per-hour ceiling.
 EMAIL_CODES_TO_CONSOLE = (os.environ.get('EMAIL_CODES_TO_CONSOLE') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+# When the sender refuses outright, hand the code to the caller on screen
+# rather than dead-ending. Turns email verification into a formality, so it
+# stays off unless a demo explicitly asks for it.
+DEMO_CODE_FALLBACK = (os.environ.get('DEMO_CODE_FALLBACK') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
 # How long a server-side "this email is verified" grant survives (minutes).
 EMAIL_VERIFICATION_GRANT_MINUTES = 30
 translation_cache = {}
@@ -524,6 +528,471 @@ def parse_location_snapshot(raw_location: str | None) -> dict | None:
         'maps_url': None,
         'raw': raw_text,
     }
+
+
+def parse_coordinate_pair(raw_text: str | None) -> tuple[float, float] | None:
+    if not raw_text:
+        return None
+
+    match = re.search(
+        r'([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)',
+        str(raw_text),
+    )
+    if not match:
+        return None
+
+    try:
+        return float(match.group(1)), float(match.group(2))
+    except ValueError:
+        return None
+
+
+def build_google_maps_directions_url(
+    origin_lat: float,
+    origin_lon: float,
+    dest_lat: float,
+    dest_lon: float,
+    travel_mode: str = 'driving',
+) -> str:
+    mode = travel_mode if travel_mode in {'driving', 'walking', 'bicycling', 'transit'} else 'driving'
+    return (
+        "https://www.google.com/maps/dir/?api=1"
+        f"&origin={origin_lat},{origin_lon}"
+        f"&destination={dest_lat},{dest_lon}"
+        f"&travelmode={mode}"
+    )
+
+
+def _nominatim_search(term: str, *, limit: int = 5, near: tuple[float, float] | None = None) -> list[dict]:
+    """One Nominatim call. `near` biases results toward the traveller."""
+    params = {
+        'q': term,
+        'format': 'jsonv2',
+        'limit': limit,
+        'addressdetails': 1,
+        'extratags': 1,
+    }
+    if near:
+        # A ~2.2 degree box around the traveller (roughly 240 km) is wide enough
+        # for an intercity trip while still demoting a same-named place abroad.
+        lat, lon = near
+        params['viewbox'] = f'{lon - 1.1},{lat + 1.1},{lon + 1.1},{lat - 1.1}'
+        params['bounded'] = 0
+
+    try:
+        response = requests.get(
+            'https://nominatim.openstreetmap.org/search',
+            params=params,
+            headers={
+                'User-Agent': 'SAFAR-Tourist-Navigation/1.0',
+                'Accept-Language': 'en',
+            },
+            timeout=8,
+        )
+        if not response.ok:
+            return []
+        return response.json() or []
+    except Exception:
+        return []
+
+
+# Nominatim hands back everything from a country polygon to a single bench.
+# Places a traveller actually types get pulled to the front; administrative
+# polygons (whose centroid is rarely where anyone wants to be dropped) sink.
+_GEOCODE_CLASS_WEIGHT = {
+    'place': 1.00,
+    'tourism': 0.95,
+    'historic': 0.92,
+    'amenity': 0.85,
+    'leisure': 0.80,
+    'natural': 0.78,
+    'railway': 0.75,
+    'aeroway': 0.75,
+    'shop': 0.60,
+    'building': 0.55,
+    'highway': 0.45,
+    'boundary': 0.30,
+}
+_GEOCODE_TYPE_WEIGHT = {
+    'city': 1.00,
+    'town': 0.95,
+    'village': 0.85,
+    'suburb': 0.80,
+    'attraction': 0.95,
+    'museum': 0.90,
+    'administrative': 0.35,
+}
+
+
+def _geocode_score(item: dict, query: str, near: tuple[float, float] | None) -> float:
+    """Rank one Nominatim hit: prominence, kind of place, then proximity."""
+    try:
+        importance = float(item.get('importance') or 0.0)
+    except (TypeError, ValueError):
+        importance = 0.0
+
+    klass = (item.get('class') or '').lower()
+    kind = (item.get('type') or '').lower()
+    score = importance * 2.0
+    score *= _GEOCODE_CLASS_WEIGHT.get(klass, 0.7)
+    score *= _GEOCODE_TYPE_WEIGHT.get(kind, 1.0)
+
+    # An exact name match beats a longer string that merely contains the query.
+    name = (item.get('name') or '').strip().lower()
+    normalized = re.sub(r'\s+', ' ', (query or '').lower()).strip()
+    if name and name == normalized:
+        score += 0.8
+    elif name and normalized and normalized in name:
+        score += 0.25
+
+    if near:
+        try:
+            distance_km = haversine(near[0], near[1], float(item['lat']), float(item['lon']))
+            # Gentle: a place 500 km away is still reachable, one 5000 km away is
+            # almost certainly the wrong continent's namesake.
+            score += max(0.0, 1.2 - (distance_km / 1200.0))
+        except (TypeError, ValueError, KeyError):
+            pass
+
+    return score
+
+
+def _geocode_candidate(item: dict) -> dict | None:
+    try:
+        latitude = float(item.get('lat'))
+        longitude = float(item.get('lon'))
+    except (TypeError, ValueError):
+        return None
+
+    display = item.get('display_name') or ''
+    address = item.get('address') or {}
+    # "Jaipur, Rajasthan, India" reads better than the 9-part display_name.
+    short_parts = [
+        item.get('name') or display.split(',')[0].strip(),
+        address.get('state_district') or address.get('county'),
+        address.get('state'),
+        address.get('country'),
+    ]
+    seen: set[str] = set()
+    label_parts: list[str] = []
+    for part in short_parts:
+        part = (part or '').strip()
+        if part and part.lower() not in seen:
+            seen.add(part.lower())
+            label_parts.append(part)
+
+    return {
+        'label': ', '.join(label_parts) or display,
+        'full_label': display,
+        'latitude': latitude,
+        'longitude': longitude,
+        'category': f"{item.get('class') or ''}/{item.get('type') or ''}".strip('/'),
+        'source': 'geocoded',
+    }
+
+
+def geocode_candidates(
+    query: str,
+    near: tuple[float, float] | None = None,
+    limit: int = 5,
+) -> list[dict]:
+    """Ranked geocoding hits for a free-text place, best first."""
+    raw_query = (query or '').strip()
+    if not raw_query:
+        return []
+
+    normalized_query = re.sub(r'\s+', ' ', raw_query.lower()).strip()
+    search_terms = [raw_query]
+    if 'india' not in normalized_query:
+        search_terms.append(f'{raw_query}, India')
+
+    scored: list[tuple[float, dict]] = []
+    seen_points: set[tuple[float, float]] = set()
+    seen_labels: set[str] = set()
+    for term in search_terms:
+        for item in _nominatim_search(term, limit=limit, near=near):
+            candidate = _geocode_candidate(item)
+            if not candidate:
+                continue
+            key = (round(candidate['latitude'], 4), round(candidate['longitude'], 4))
+            label_key = candidate['label'].strip().lower()
+            if key in seen_points or label_key in seen_labels:
+                continue
+            seen_points.add(key)
+            seen_labels.add(label_key)
+            scored.append((_geocode_score(item, raw_query, near), candidate))
+        # The plain query already produced strong hits; skip the ", India" retry.
+        if scored:
+            break
+
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [candidate for _, candidate in scored[:limit]]
+
+
+def photon_suggestions(
+    query: str,
+    near: tuple[float, float] | None = None,
+    limit: int = 6,
+) -> list[dict]:
+    """
+    Type-ahead place suggestions.
+
+    Nominatim only matches whole words — "hawa mah" returns nothing — so the
+    search box talks to Photon, which is built for partial input and takes the
+    same keyless, no-account terms.
+    """
+    raw_query = (query or '').strip()
+    if len(raw_query) < 3:
+        return []
+
+    params = {'q': raw_query, 'limit': max(limit * 2, 10), 'lang': 'en'}
+    if near:
+        params['lat'] = near[0]
+        params['lon'] = near[1]
+
+    try:
+        response = requests.get(
+            'https://photon.komoot.io/api/',
+            params=params,
+            headers={'User-Agent': 'SAFAR-Tourist-Navigation/1.0'},
+            timeout=6,
+        )
+        if not response.ok:
+            return []
+        features = (response.json() or {}).get('features') or []
+    except Exception:
+        return []
+
+    suggestions: list[dict] = []
+    seen: set[str] = set()
+    for feature in features:
+        props = feature.get('properties') or {}
+        coordinates = (feature.get('geometry') or {}).get('coordinates') or []
+        if len(coordinates) < 2:
+            continue
+
+        name = (props.get('name') or '').strip()
+        if not name:
+            continue
+
+        # Photon returns raw OSM landuse polygons alongside real places; a
+        # residential estate named after a monument is never the search intent.
+        if props.get('osm_key') in {'landuse', 'boundary'}:
+            continue
+
+        context_parts = [
+            props.get('city') or props.get('district') or props.get('county'),
+            props.get('state'),
+            props.get('country'),
+        ]
+        label_parts = [name] + [part for part in context_parts if part]
+        label = ', '.join(dict.fromkeys(label_parts))
+
+        key = label.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        suggestions.append({
+            'label': label,
+            'full_label': ', '.join(dict.fromkeys(
+                [name] + [p for p in [props.get('street'), props.get('city'), props.get('county'),
+                                      props.get('state'), props.get('postcode'), props.get('country')] if p]
+            )),
+            'latitude': float(coordinates[1]),
+            'longitude': float(coordinates[0]),
+            'category': f"{props.get('osm_key') or ''}/{props.get('osm_value') or ''}".strip('/'),
+            'source': 'photon',
+        })
+        if len(suggestions) >= limit:
+            break
+
+    return suggestions
+
+
+def resolve_navigation_destination(
+    query: str,
+    near: tuple[float, float] | None = None,
+) -> dict | None:
+    raw_query = (query or '').strip()
+    if not raw_query:
+        return None
+
+    coord_pair = parse_coordinate_pair(raw_query)
+    if coord_pair:
+        latitude, longitude = coord_pair
+        return {
+            'label': f"{latitude:.5f}, {longitude:.5f}",
+            'latitude': latitude,
+            'longitude': longitude,
+            'source': 'coordinates',
+        }
+
+    normalized_query = re.sub(r'\s+', ' ', raw_query.lower()).strip()
+    zones = SafetyZone.query.all()
+    for zone in zones:
+        zone_name = re.sub(r'\s+', ' ', (zone.name or '').lower()).strip()
+        if not zone_name:
+            continue
+        if zone_name == normalized_query or zone_name in normalized_query or normalized_query in zone_name:
+            return {
+                'label': zone.name,
+                'latitude': zone.latitude,
+                'longitude': zone.longitude,
+                'source': 'safety_zone',
+            }
+
+    destination = Destination.query.filter(func.lower(Destination.name) == normalized_query).first()
+    if destination and destination.safety_zones:
+        zone = destination.safety_zones[0]
+        return {
+            'label': zone.name or destination.name,
+            'latitude': zone.latitude,
+            'longitude': zone.longitude,
+            'source': 'destination_zone',
+        }
+
+    candidates = geocode_candidates(raw_query, near=near)
+    if not candidates:
+        return None
+
+    best = dict(candidates[0])
+    # Anything else worth offering the traveller as "did you mean".
+    best['alternatives'] = candidates[1:]
+    return best
+
+
+# The public OSRM demo server (router.project-osrm.org) only hosts the *car*
+# profile: its /walking and /cycling endpoints return the identical car route
+# at car speed. FOSSGIS runs one instance per real profile, so each travel mode
+# gets a router that actually understands it (one-ways, footpaths, cycleways).
+OSRM_PROFILES = {
+    'driving': [
+        ('https://routing.openstreetmap.de/routed-car', 'driving', 'osrm-car'),
+        ('https://router.project-osrm.org', 'driving', 'osrm-demo'),
+    ],
+    'walking': [
+        ('https://routing.openstreetmap.de/routed-foot', 'foot', 'osrm-foot'),
+    ],
+    'cycling': [
+        ('https://routing.openstreetmap.de/routed-bike', 'bike', 'osrm-bike'),
+    ],
+}
+
+
+def _osrm_instruction(step: dict) -> str:
+    maneuver = step.get('maneuver') or {}
+    step_name = step.get('name') or ''
+    modifier = maneuver.get('modifier') or ''
+    step_type = maneuver.get('type') or ''
+
+    if step_type == 'depart':
+        return f"Start on {step_name}" if step_name else 'Start your trip'
+    if step_type == 'arrive':
+        return 'Arrive at your destination'
+    if step_type in {'roundabout', 'rotary', 'roundabout turn'}:
+        exit_no = maneuver.get('exit')
+        road_name = f"onto {step_name}" if step_name else ''
+        # OSRM omits the exit number on small roundabouts; "take exit None" is
+        # worse than no number at all.
+        if exit_no:
+            return f"At the roundabout, take exit {exit_no} {road_name}".strip()
+        return f"At the roundabout, continue {road_name}".strip() if road_name else 'Continue through the roundabout'
+    if step_type == 'turn':
+        direction = f"{modifier} turn".strip()
+        return f"Make a {direction} onto {step_name}" if step_name else f"Make a {direction}"
+    if step_type == 'merge':
+        return f"Merge onto {step_name}" if step_name else 'Merge ahead'
+    if step_type in {'continue', 'new name'}:
+        return f"Continue on {step_name}" if step_name else 'Continue straight'
+    if step_name:
+        return f"Follow {step_name}"
+    return step_type.replace('_', ' ').title() if step_type else 'Continue'
+
+
+def _osrm_steps(route: dict) -> list[dict]:
+    steps_payload = []
+    for leg in route.get('legs') or []:
+        for step in leg.get('steps') or []:
+            maneuver = step.get('maneuver') or {}
+            location = maneuver.get('location') or []
+            steps_payload.append({
+                'instruction': _osrm_instruction(step),
+                'distance_m': step.get('distance'),
+                'duration_s': step.get('duration'),
+                'mode': step.get('mode'),
+                'name': step.get('name') or '',
+                'type': maneuver.get('type') or '',
+                'modifier': maneuver.get('modifier') or '',
+                'latitude': float(location[1]) if len(location) >= 2 else None,
+                'longitude': float(location[0]) if len(location) >= 2 else None,
+                'geometry': ((step.get('geometry') or {}).get('coordinates')) or [],
+            })
+    return steps_payload
+
+
+def fetch_navigation_route(
+    origin_lat: float,
+    origin_lon: float,
+    dest_lat: float,
+    dest_lon: float,
+    travel_mode: str = 'driving',
+    include_steps: bool = True,
+) -> dict | None:
+    mode = travel_mode if travel_mode in OSRM_PROFILES else 'driving'
+
+    for host, profile, provider in OSRM_PROFILES[mode]:
+        route_url = f'{host}/route/v1/{profile}/{origin_lon},{origin_lat};{dest_lon},{dest_lat}'
+        try:
+            response = requests.get(
+                route_url,
+                params={
+                    'overview': 'full',
+                    'geometries': 'geojson',
+                    'steps': 'true' if include_steps else 'false',
+                    # Alternatives cost nothing extra and let the UI say how much
+                    # a second option would add.
+                    'alternatives': 'true' if mode == 'driving' else 'false',
+                },
+                timeout=12,
+            )
+            if not response.ok:
+                continue
+
+            payload = response.json() or {}
+            routes = payload.get('routes') or []
+            if not routes:
+                continue
+
+            route = routes[0]
+            coordinates = (route.get('geometry') or {}).get('coordinates') or []
+            if not coordinates:
+                continue
+
+            alternatives = []
+            for alternative in routes[1:3]:
+                alt_coords = (alternative.get('geometry') or {}).get('coordinates') or []
+                if not alt_coords:
+                    continue
+                alternatives.append({
+                    'distance_m': alternative.get('distance'),
+                    'duration_s': alternative.get('duration'),
+                    'coordinates': alt_coords,
+                })
+
+            return {
+                'provider': provider,
+                'profile': profile,
+                'distance_m': route.get('distance'),
+                'duration_s': route.get('duration'),
+                'coordinates': coordinates,
+                'steps': _osrm_steps(route) if include_steps else [],
+                'alternatives': alternatives,
+            }
+        except Exception:
+            continue
+
+    return None
 
 
 def serialize_group_card(group: Group, member_ids: set[str]) -> dict:
@@ -2023,6 +2492,22 @@ def use_console_email_codes() -> bool:
     return EMAIL_CODES_TO_CONSOLE or not SUPABASE_AUTH_ENABLED
 
 
+def issue_local_email_code(email: str) -> str:
+    """Mint a code this server checks itself, instead of one Supabase mailed."""
+    code = str(random.randint(100000, 999999))
+    session['dev_email_code'] = code
+    session['dev_email_target'] = email
+    # flush: gunicorn buffers stdout, and an unflushed code never reaches the
+    # log the operator is reading it from.
+    print(f"[SAFAR] Email verification code for {email}: {code}", flush=True)
+    return code
+
+
+def local_email_code_pending(email: str) -> bool:
+    """True when this session is holding a locally issued code for `email`."""
+    return bool(session.get('dev_email_code')) and session.get('dev_email_target') == email
+
+
 @app.route('/api/auth/email/send-code', methods=['POST'])
 def api_send_email_code():
     """
@@ -2054,12 +2539,7 @@ def api_send_email_code():
     clear_email_verification()
 
     if use_console_email_codes():
-        code = str(random.randint(100000, 999999))
-        session['dev_email_code'] = code
-        session['dev_email_target'] = email
-        # flush: gunicorn buffers stdout, and an unflushed code never reaches
-        # the log the operator is reading it from.
-        print(f"[SAFAR] Email verification code for {email}: {code}", flush=True)
+        issue_local_email_code(email)
         return jsonify({
             'message': 'Verification code written to the server log.',
             'dev_mode': True,
@@ -2069,6 +2549,19 @@ def api_send_email_code():
 
     if status == 200:
         return jsonify({'message': 'Verification code sent. Check your inbox.'}), 200
+
+    # The built-in sender refuses in two ways that both stop a demo dead: the
+    # 2-per-hour quota (429), and any address outside the project team (400
+    # "Email address not authorized"). Both mean no mail will ever arrive, so
+    # retrying is pointless — issue our own code and show it instead.
+    if DEMO_CODE_FALLBACK and status in (429, 400, 401, 403, 422):
+        code = issue_local_email_code(email)
+        return jsonify({
+            'message': 'The email service would not deliver, so here is your code.',
+            'code': code,
+            'fallback_reason': supabase_error_message(body, 'Email could not be sent.'),
+        }), 200
+
     if status == 429:
         return jsonify({
             'error': supabase_error_message(body, 'Too many requests. Wait a minute and try again.')
@@ -2098,7 +2591,9 @@ def api_verify_email_code():
     if not email or not code:
         return jsonify({'error': 'Email and verification code are required.'}), 400
 
-    if use_console_email_codes():
+    # A code we minted ourselves is never known to Supabase, so it has to be
+    # checked here — whether it came from console mode or the demo fallback.
+    if use_console_email_codes() or local_email_code_pending(email):
         expected = session.get('dev_email_code')
         target   = session.get('dev_email_target')
         if not expected or target != email:
@@ -2672,6 +3167,113 @@ def safety_my_profile():
 
 
 # ── IoT Device API  (/api/iot/...) ─────────────
+
+@app.route('/api/navigation/route', methods=['POST'])
+def api_navigation_route():
+    tourist = get_current_tourist()
+    if not tourist:
+        return jsonify({'error': 'No tourist profile found.'}), 404
+
+    data = request.get_json(force=True) or {}
+    destination_query = (data.get('destination') or data.get('query') or '').strip()
+    if not destination_query:
+        return jsonify({'error': 'destination is required.'}), 400
+
+    origin_pair = None
+    try:
+        origin_lat = data.get('origin_lat')
+        origin_lon = data.get('origin_lon')
+        if origin_lat is not None and origin_lon is not None:
+            origin_pair = (float(origin_lat), float(origin_lon))
+    except (TypeError, ValueError):
+        origin_pair = None
+
+    if not origin_pair:
+        current_location = parse_location_snapshot(tourist.last_known_location)
+        if current_location and current_location.get('latitude') is not None and current_location.get('longitude') is not None:
+            origin_pair = (current_location['latitude'], current_location['longitude'])
+
+    if not origin_pair:
+        return jsonify({'error': 'Your current location is not available yet.'}), 400
+
+    destination = resolve_navigation_destination(destination_query, near=origin_pair)
+    if not destination:
+        return jsonify({'error': f'Could not find a route target for "{destination_query}".'}), 404
+
+    route = fetch_navigation_route(
+        origin_pair[0],
+        origin_pair[1],
+        destination['latitude'],
+        destination['longitude'],
+        travel_mode=(data.get('travel_mode') or 'driving').strip().lower(),
+        include_steps=(str(data.get('with_steps', '1')).strip().lower() not in {'0', 'false', 'no', 'off'}),
+    )
+
+    directions_url = build_google_maps_directions_url(
+        origin_pair[0],
+        origin_pair[1],
+        destination['latitude'],
+        destination['longitude'],
+        travel_mode=(data.get('travel_mode') or 'driving').strip().lower(),
+    )
+
+    response_payload = {
+        'candidates': destination.pop('alternatives', []),
+        'origin': {
+            'latitude': origin_pair[0],
+            'longitude': origin_pair[1],
+            'label': 'Current location',
+        },
+        'destination': destination,
+        'directions_url': directions_url,
+    }
+
+    if route and route.get('coordinates'):
+        response_payload['route'] = {
+            'provider': route['provider'],
+            'profile': route.get('profile'),
+            'distance_km': round((route.get('distance_m') or 0) / 1000, 2),
+            'duration_min': round((route.get('duration_s') or 0) / 60, 1),
+            'distance_m': route.get('distance_m'),
+            'duration_s': route.get('duration_s'),
+            'coordinates': route['coordinates'],
+            'steps': route.get('steps') or [],
+            'alternatives': route.get('alternatives') or [],
+        }
+    else:
+        response_payload['route'] = None
+        response_payload['message'] = 'Navigation preview is available, but live routing could not be loaded right now.'
+
+    return jsonify(response_payload)
+
+
+@app.route('/api/navigation/suggest')
+def api_navigation_suggest():
+    """Type-ahead place suggestions for the navigation search box."""
+    query = (request.args.get('q') or '').strip()
+    if len(query) < 3:
+        return jsonify({'suggestions': []})
+
+    near = None
+    try:
+        lat = request.args.get('lat')
+        lon = request.args.get('lon')
+        if lat is not None and lon is not None:
+            near = (float(lat), float(lon))
+    except (TypeError, ValueError):
+        near = None
+
+    if near is None:
+        tourist = get_current_tourist()
+        snapshot = parse_location_snapshot(tourist.last_known_location) if tourist else None
+        if snapshot and snapshot.get('latitude') is not None:
+            near = (snapshot['latitude'], snapshot['longitude'])
+
+    suggestions = photon_suggestions(query, near=near, limit=5)
+    if not suggestions:
+        suggestions = geocode_candidates(query, near=near, limit=5)
+    return jsonify({'suggestions': suggestions})
+
 
 @app.route('/api/iot/blynk-webhook', methods=['GET', 'POST'])
 def api_iot_blynk_webhook():

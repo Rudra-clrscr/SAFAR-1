@@ -550,6 +550,171 @@
   line-height: 1.5;
 }
 
+.garuda-navigation-panel {
+  margin-top: 18px;
+  padding: 18px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015));
+  border: 1px solid rgba(255, 232, 201, 0.08);
+}
+
+.garuda-navigation-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.garuda-navigation-header h3 {
+  font-size: 1.02rem;
+  color: #fff7ec;
+  margin-top: 4px;
+}
+
+.garuda-nav-state {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 232, 201, 0.10);
+  color: #ffe7cb;
+}
+
+.garuda-nav-state.loading {
+  background: rgba(240, 189, 116, 0.12);
+  border-color: rgba(240, 189, 116, 0.18);
+  color: var(--garuda-amber);
+}
+
+.garuda-nav-state.ok {
+  background: rgba(66, 179, 114, 0.14);
+  border-color: rgba(92, 222, 144, 0.24);
+  color: #8effbe;
+}
+
+.garuda-nav-state.err {
+  background: rgba(255, 109, 77, 0.14);
+  border-color: rgba(255, 126, 97, 0.24);
+  color: #ffb09a;
+}
+
+.garuda-navigation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.garuda-navigation-row input {
+  width: 100%;
+  min-height: 52px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 232, 201, 0.12);
+  background: rgba(11, 9, 10, 0.72);
+  color: #fff7ec;
+  padding: 0 14px;
+  outline: none;
+}
+
+.garuda-navigation-row input::placeholder {
+  color: rgba(255, 214, 177, 0.52);
+}
+
+.garuda-navigation-row input:focus {
+  border-color: rgba(240, 189, 116, 0.36);
+  box-shadow: 0 0 0 3px rgba(240, 189, 116, 0.12);
+}
+
+.garuda-navigation-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.garuda-nav-chip {
+  border: 1px solid rgba(255, 232, 201, 0.10);
+  background: rgba(255, 255, 255, 0.03);
+  color: #ffe7cb;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.garuda-nav-chip:hover {
+  transform: translateY(-1px);
+  border-color: rgba(240, 189, 116, 0.24);
+  background: rgba(240, 189, 116, 0.08);
+}
+
+.garuda-navigation-summary {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 232, 201, 0.08);
+  color: rgba(255, 229, 209, 0.80);
+  line-height: 1.65;
+}
+
+.garuda-navigation-steps {
+  margin-top: 14px;
+  padding: 14px 16px 14px 34px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 232, 201, 0.08);
+  color: rgba(255, 229, 209, 0.82);
+  line-height: 1.65;
+}
+
+.garuda-navigation-steps li + li {
+  margin-top: 8px;
+}
+
+.garuda-navigation-steps li.is-active-step {
+  color: #2a170c;
+  background: rgba(240, 189, 116, 0.12);
+  border-left: 4px solid #f0bd74;
+  margin-left: -12px;
+  padding: 8px 12px 8px 16px;
+  border-radius: 14px;
+}
+
+.garuda-navigation-step-meta {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.76rem;
+  color: rgba(255, 214, 177, 0.60);
+}
+
+.garuda-navigation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.garuda-navigation-actions .btn {
+  min-height: 42px;
+}
+
+.garuda-navigation-actions .btn.is-disabled {
+  pointer-events: none;
+  opacity: 0.55;
+  filter: grayscale(0.25);
+}
+
 .garuda-side-stack {
   display: grid;
   gap: 18px;
@@ -851,6 +1016,10 @@
     grid-template-columns: 1fr;
   }
 
+  .garuda-navigation-row {
+    grid-template-columns: 1fr;
+  }
+
   .garuda-score-wrap {
     grid-template-columns: 1fr;
     justify-items: center;
@@ -875,4 +1044,10 @@
     width: 124px;
     height: 124px;
   }
+}
+
+/* Keyless OSM tiles rendered dark to match the Garuda dashboard. The filter is
+   scoped to the tile pane so markers, zone circles and routes keep their colour. */
+#userMap .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.5);
 }

@@ -3,6 +3,7 @@
   let userMarker;
   let zoneCache = [];
   let syncTimer = null;
+  let currentPosition = null;
 
   const body = document.body;
   const isPreview = body.dataset.preview === 'true';
@@ -32,6 +33,14 @@
       gpsDenied: 'GPS permission denied',
       gpsActive: 'GPS active',
       gpsFailed: 'Location sync failed',
+      navReady: 'Ready',
+      navLoading: 'Planning route...',
+      navNeedDestination: 'Enter a destination to begin navigation.',
+      navNeedLocation: 'Your current location is not available yet.',
+      navFailed: 'Unable to load navigation right now.',
+      navPreviewFallback: 'Route preview is ready, but live navigation could not be loaded. Open the external map link below to continue.',
+      navOpenMap: 'Open in Google Maps',
+      navStepsEmpty: 'Turn-by-turn guidance will appear here once a route is found.',
       firstSyncPending: 'Awaiting first sync',
       liveCoordinatesPending: 'Awaiting live coordinates',
       responseReady: 'Response Ready',
@@ -148,6 +157,17 @@
     return `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
   }
 
+  function parseLocationText(raw) {
+    if (!raw) return null;
+    const match = String(raw).match(/([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)/);
+    if (!match) return null;
+
+    const latitude = Number.parseFloat(match[1]);
+    const longitude = Number.parseFloat(match[2]);
+    if (Number.isNaN(latitude) || Number.isNaN(longitude)) return null;
+    return { latitude, longitude };
+  }
+
   function formatRadius(radius) {
     return `${radius} km`;
   }
@@ -232,7 +252,10 @@
 
   function ensureMarker(lat, lon) {
     if (!userMap) return;
-    userMap.setView([lat, lon], 14);
+    currentPosition = { latitude: lat, longitude: lon };
+    if (!userMarker) {
+      userMap.setView([lat, lon], 14);
+    }
 
     if (!userMarker) {
       userMarker = L.marker([lat, lon]).addTo(userMap).bindPopup(text('myLocation'));
@@ -358,8 +381,11 @@
   function initMap() {
     if (!dom.mapContainer) return;
     userMap = L.map('userMap', { zoomControl: true }).setView([22.9734, 78.6569], 5);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; CARTO &copy; OpenStreetMap',
+    // CARTO stamps "API KEY REQUIRED" across unauthenticated tiles; OSM is
+    // keyless and gets its dark treatment from a CSS filter on the tile pane.
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
     }).addTo(userMap);
   }
 

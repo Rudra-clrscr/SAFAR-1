@@ -4551,7 +4551,11 @@ footer p {
 }
 
 /* ── Navbar Gita bar offset ──────────────── */
-.navbar-with-bar { top: 37px; }
+/* The shloka bar is ~39px tall (46px on the home page) and paints above the
+   navbar, so a hardcoded 37px parked the pill underneath it. */
+:root { --gita-bar-h: 39px; }
+.home-page { --gita-bar-h: 46px; }
+.navbar-with-bar { top: calc(var(--gita-bar-h) + 2px); }
 body { padding-top: 0; }
 
 /* ── Discord App Sidebar ─────────────────── */

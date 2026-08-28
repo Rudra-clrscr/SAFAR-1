@@ -8,6 +8,7 @@
     name="description"
     content="Garuda is SAFAR's live safety response system for verified travelers, combining GPS tracking, monitored zones, SOS response, and IoT-linked protection.">
   <link rel="stylesheet" href="/static/profile.css">
+  <link rel="stylesheet" href="/static/navigation.css">
   <link rel="stylesheet" href="/static/tour.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -218,6 +219,122 @@
             <strong id="last-location">{{ tourist.last_known_location or 'Awaiting live coordinates' }}</strong>
           </div>
         </div>
+        <div class="garuda-navigation-panel">
+          <div class="garuda-navigation-header">
+            <div>
+              <span class="garuda-card-kicker">Tour Navigation</span>
+              <h3>Plan your next route</h3>
+            </div>
+            <span class="garuda-nav-state" id="nav-route-state">Ready</span>
+          </div>
+          <div class="garuda-navigation-row">
+            <input
+              type="text"
+              id="nav-destination"
+              placeholder="Search a city, landmark, or safety zone">
+            <button class="btn btn-ast" type="button" id="nav-route-btn">
+              <i class="fas fa-route"></i>
+              Get Route
+            </button>
+          </div>
+          <div class="garuda-navigation-chips" id="nav-quick-chips">
+            <button type="button" class="garuda-nav-chip" data-nav-target="Manali">Manali</button>
+            <button type="button" class="garuda-nav-chip" data-nav-target="Goa">Goa</button>
+            <button type="button" class="garuda-nav-chip" data-nav-target="Jaipur">Jaipur</button>
+            <button type="button" class="garuda-nav-chip" data-nav-target="Kerala">Kerala</button>
+            <button type="button" class="garuda-nav-chip" data-nav-target="Varanasi">Varanasi</button>
+            <button type="button" class="garuda-nav-chip" data-nav-target="Agra">Agra</button>
+            <button type="button" class="garuda-nav-chip" data-nav-target="Shimla">Shimla</button>
+            <button type="button" class="garuda-nav-chip" data-nav-target="Ladakh">Ladakh</button>
+          </div>
+          <div class="garuda-navigation-livebar">
+            <div class="garuda-navigation-next">
+              <span>Next turn</span>
+              <strong data-nav-next>Pick a destination to begin</strong>
+              <small data-nav-distance>Live map will follow your position</small>
+            </div>
+            <button type="button" class="btn btn-ghost garuda-follow-btn" data-nav-follow>Follow Me</button>
+          </div>
+          <div class="garuda-navigation-modebar" data-nav-modebar>
+            <button type="button" class="garuda-mode-btn active" data-nav-mode="driving">Drive</button>
+            <button type="button" class="garuda-mode-btn" data-nav-mode="walking">Walk</button>
+          </div>
+          <div class="garuda-navigation-map-shell">
+            <div class="garuda-navigation-map-overlay">
+              <span class="garuda-navigation-overlay-kicker">Live navigation</span>
+              <strong data-nav-current>Waiting for a route</strong>
+              <small data-nav-current-sub>Allow location access to follow your trip like Google Maps.</small>
+              <button type="button" class="btn btn-ghost garuda-center-btn" data-nav-center>Recenter</button>
+            </div>
+            <div class="garuda-navigation-map" data-nav-map aria-label="Route map"></div>
+            <button type="button" class="nav-view-toggle" data-nav-3d aria-pressed="false" title="Switch between the flat map and the tilted 3D view">
+              <i class="fas fa-cube"></i> 3D
+            </button>
+            <div class="garuda-navigation-bottomsheet">
+              <div class="garuda-navigation-bottomsheet-top">
+                <div>
+                  <span class="garuda-navigation-bottomsheet-kicker" data-nav-sheet-state>Ready</span>
+                  <strong data-nav-sheet-title>Turn-by-turn guide</strong>
+                  <small data-nav-sheet-subtitle>Use Drive or Walk mode to preview your route.</small>
+                </div>
+              </div>
+              <div class="garuda-navigation-bottomsheet-meta">
+                <span data-nav-sheet-meta>Route progress will appear here</span>
+              </div>
+            <div class="garuda-navigation-progress" aria-label="Route progress">
+                <div class="garuda-navigation-progress-track">
+                  <div class="garuda-navigation-progress-fill" data-nav-sheet-progress></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="garuda-navigation-summary" id="nav-summary">
+            Choose a destination to preview navigation from your current position.
+          </div>
+          <div class="garuda-navigation-guide-panel is-collapsed" data-nav-guide-panel hidden>
+            <div class="garuda-navigation-guide-panel-header">
+              <div>
+                <span class="garuda-navigation-guide-panel-kicker">Travel guide</span>
+                <strong>Full route overview</strong>
+              </div>
+            </div>
+            <div class="nav-guide-controls">
+              <button type="button" class="btn btn-ghost btn-sm nav-guide-step-btn" data-nav-guide-prev>
+                <i class="fas fa-chevron-left"></i>
+                <span>Previous</span>
+              </button>
+              <span class="nav-guide-counter" data-nav-guide-counter>No route yet</span>
+              <button type="button" class="btn btn-ghost btn-sm nav-guide-step-btn" data-nav-guide-next>
+                <span>Next</span>
+                <i class="fas fa-chevron-right"></i>
+              </button>
+              <button type="button" class="btn btn-tt btn-sm nav-guide-play" data-nav-guide-play>
+                <i class="fas fa-play"></i> Play Guide
+              </button>
+            </div>
+            <ol class="garuda-navigation-steps" id="nav-steps">
+              <li>Turn-by-turn guidance will appear here once a route is found.</li>
+            </ol>
+          </div>
+          <div class="garuda-navigation-actions">
+            <button type="button" class="btn btn-ast btn-sm garuda-guide-toggle" data-nav-guide-toggle disabled>
+              <i class="fas fa-map-signs"></i>
+              Travel Guide
+            </button>
+            <button type="button" class="btn btn-ghost btn-sm" id="nav-clear-btn">
+              Clear Route
+            </button>
+            <a
+              class="btn btn-tt btn-sm"
+              id="nav-open-btn"
+              href="#"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-disabled="true">
+              Open in Google Maps
+            </a>
+          </div>
+        </div>
       </div>
 
       <div class="garuda-side-stack">
@@ -377,6 +494,7 @@
 
   <script src="/static/script.js"></script>
   <script src="/static/profile.js"></script>
+  <script src="/static/navigation.js"></script>
   <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
   <script src="/static/dictionary-agent.js"></script>
   <script src="/static/translator-core.js"></script>

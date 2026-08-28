@@ -150,7 +150,7 @@
 <script>
 const adminMap = L.map('adminMap').setView([22.57, 88.36], 5);
 let touristMarkers = L.layerGroup().addTo(adminMap);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '© CARTO', maxZoom: 20 }).addTo(adminMap);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors', maxZoom: 19 }).addTo(adminMap);
 
 // last_known_location is stored in more than one shape: "Lat: 28.36, Lon: 79.46"
 // from the IoT writers, a bare "35.67, 139.65" from seeded/manual rows, and
